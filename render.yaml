@@ -23,5 +23,5 @@ databases:
   # Managed PostgreSQL Database on Render
   - name: fluencycast-db
     databaseName: fluency_cast
-    user: postgres
+    user: fluency_user
     plan: free
