@@ -115,10 +115,24 @@ def fetch_transcript(video_id: str) -> List[Dict[str, Any]]:
             else:
                 raise NoTranscriptFound(video_id, ["en"])
 
-    except (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable, CouldNotRetrieveTranscript) as e:
-        raise ValueError("Não foi possível obter uma transcrição para este vídeo. Certifique-se de que o vídeo possui legendas ativadas no YouTube.")
+    except TranscriptsDisabled:
+        print(f"[YouTube] Transcripts disabled by author for video: {video_id}")
+        raise ValueError("O autor deste vídeo desativou as legendas no YouTube.")
+    except NoTranscriptFound:
+        print(f"[YouTube] No English transcript found for video: {video_id}")
+        raise ValueError("Este vídeo não possui legendas disponíveis em inglês.")
+    except VideoUnavailable:
+        print(f"[YouTube] Video unavailable: {video_id}")
+        raise ValueError("Este vídeo está indisponível, privado ou foi removido do YouTube.")
+    except CouldNotRetrieveTranscript as e:
+        error_name = type(e).__name__
+        print(f"[YouTube] Could not retrieve transcript ({error_name}) for {video_id}: {e}")
+        if "IpBlocked" in error_name or "blocking requests from your IP" in str(e):
+            raise ValueError("O YouTube bloqueou temporariamente requisições deste servidor em nuvem (Render IP ban).")
+        raise ValueError(f"Não foi possível obter legendas para este vídeo: {str(e)}")
     except Exception as e:
-        raise ValueError(f"Não foi possível processar a transcrição deste vídeo: {str(e)}")
+        print(f"[YouTube] Unexpected error for {video_id}: {type(e).__name__} - {e}")
+        raise ValueError(f"Erro ao processar vídeo: {str(e)}")
 
     parsed_items = []
     for item in raw_transcript:
