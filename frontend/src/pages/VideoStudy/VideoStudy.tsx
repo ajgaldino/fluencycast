@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -17,7 +17,8 @@ import {
   Info,
   X,
   ExternalLink,
-  Edit3
+  Edit3,
+  Scissors
 } from 'lucide-react';
 import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
@@ -30,6 +31,67 @@ declare global {
     YT: any;
     onYouTubeIframeAPIReady: () => void;
   }
+}
+
+/**
+ * Intelligent sentence fragmenter:
+ * Breaks long paragraphs into concise, bite-sized phrases (8-12 words max)
+ * with precisely calculated proportional timestamps.
+ */
+function fragmentSegments(rawSegments: TranscriptSegment[]): TranscriptSegment[] {
+  const result: TranscriptSegment[] = [];
+
+  for (const seg of rawSegments) {
+    const text = seg.text.trim();
+    if (!text) continue;
+
+    // Split on sentence terminators (. ! ?)
+    const rawSentences = text
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const pieces: string[] = [];
+    for (const s of rawSentences) {
+      const words = s.split(/\s+/);
+      if (words.length > 12) {
+        // Split by comma, semicolon, dash if still long
+        const sub = s.split(/(?<=[,;—])\s+/).map((p) => p.trim()).filter(Boolean);
+        if (sub.length > 1 && sub.every((p) => p.split(/\s+/).length <= 14)) {
+          pieces.push(...sub);
+        } else {
+          pieces.push(s);
+        }
+      } else {
+        pieces.push(s);
+      }
+    }
+
+    if (pieces.length <= 1) {
+      result.push(seg);
+      continue;
+    }
+
+    const totalLen = pieces.reduce((sum, p) => sum + p.length, 0) || 1;
+    const totalDur = Math.max(0.6, seg.end_time - seg.start_time);
+
+    let currStart = seg.start_time;
+    pieces.forEach((p, idx) => {
+      const pDur = (p.length / totalLen) * totalDur;
+      const pEnd = currStart + pDur;
+      result.push({
+        id: `${seg.id}_p${idx + 1}`,
+        video_id: seg.video_id,
+        sequence: result.length + 1,
+        text: p,
+        start_time: Math.round(currStart * 100) / 100,
+        end_time: Math.round(pEnd * 100) / 100,
+      });
+      currStart = pEnd;
+    });
+  }
+
+  return result;
 }
 
 export const VideoStudy: React.FC = () => {
@@ -50,6 +112,7 @@ export const VideoStudy: React.FC = () => {
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [autoTranslate, setAutoTranslate] = useState(false);
+  const [shortSentencesMode, setShortSentencesMode] = useState(true);
 
   // Synchronized Transcript State
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
@@ -59,14 +122,14 @@ export const VideoStudy: React.FC = () => {
   const [savedSegmentIds, setSavedSegmentIds] = useState<Set<string>>(new Set());
   const [savingSegmentIds, setSavingSegmentIds] = useState<Record<string, boolean>>({});
 
-  // Segment Edit Modal
+  // Segment Edit Modal State
   const [editingSeg, setEditingSeg] = useState<TranscriptSegment | null>(null);
   const [editText, setEditText] = useState('');
   const [editTranslation, setEditTranslation] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [aiTranslatingEdit, setAiTranslatingEdit] = useState(false);
 
-  // AI Explain Modal
+  // AI Explain Modal State
   const [explainingSegment, setExplainingSegment] = useState<TranscriptSegment | null>(null);
   const [explainData, setExplainData] = useState<ExplainResponse | null>(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
@@ -112,6 +175,13 @@ export const VideoStudy: React.FC = () => {
     };
   }, [id]);
 
+  // Displayed Segments (Full or Fragmented into short sentences)
+  const displayedSegments = useMemo(() => {
+    if (!video?.segments) return [];
+    if (!shortSentencesMode) return video.segments;
+    return fragmentSegments(video.segments);
+  }, [video?.segments, shortSentencesMode]);
+
   // 2. Initialize YouTube IFrame Player
   useEffect(() => {
     if (!video || !video.youtube_id) return;
@@ -130,7 +200,6 @@ export const VideoStudy: React.FC = () => {
         }
       }
 
-      // Recreate fresh mount target to avoid orphaned iframes
       containerRef.current.innerHTML = '<div id="yt-study-player"></div>';
 
       try {
@@ -159,7 +228,6 @@ export const VideoStudy: React.FC = () => {
             },
             onStateChange: (event: any) => {
               if (destroyed) return;
-              // YT.PlayerState.PLAYING = 1, PAUSED = 2, ENDED = 0
               if (event.data === 1) {
                 setIsPlaying(true);
               } else {
@@ -214,31 +282,42 @@ export const VideoStudy: React.FC = () => {
         if (typeof time === 'number' && !isNaN(time)) {
           setCurrentTime(time);
 
-          if (video && video.segments && video.segments.length > 0) {
-            // Find current active segment
-            const seg = video.segments.find(
+          if (displayedSegments.length > 0) {
+            const seg = displayedSegments.find(
               (s) => time >= s.start_time && time < s.end_time
             );
 
             if (seg) {
               setActiveSegmentId(seg.id);
 
-              // If loop mode is activated on this segment:
-              if (isLoopingSegment && time >= seg.end_time - 0.25) {
+              if (isLoopingSegment && time >= seg.end_time - 0.2) {
                 playerRef.current.seekTo(seg.start_time, true);
               }
             }
           }
         }
       } catch (e) {
-        // Player not ready or iframe cross-origin check
+        // Player not ready
       }
     }, 150);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [video, isLoopingSegment]);
+  }, [displayedSegments, isLoopingSegment]);
+
+  // Auto-translate active segment if live autoTranslate is enabled
+  useEffect(() => {
+    if (!autoTranslate || !activeSegmentId || displayedSegments.length === 0) return;
+    const seg = displayedSegments.find((s) => s.id === activeSegmentId);
+    if (!seg || translations[seg.id] || translatingIds[seg.id]) return;
+
+    aiService.translate(seg.text).then((res) => {
+      if (res.translation && res.translation.toLowerCase() !== seg.text.toLowerCase()) {
+        setTranslations((prev) => ({ ...prev, [seg.id]: res.translation }));
+      }
+    }).catch(() => {});
+  }, [activeSegmentId, autoTranslate, displayedSegments]);
 
   // 4. Auto-Scroll to Active Segment
   useEffect(() => {
@@ -261,64 +340,90 @@ export const VideoStudy: React.FC = () => {
 
   // Player controls
   const handleTogglePlay = () => {
-    if (!playerRef.current) return;
-    if (isPlaying) {
-      playerRef.current.pauseVideo();
-    } else {
-      playerRef.current.playVideo();
-    }
+    if (!playerRef.current || typeof playerRef.current.playVideo !== 'function') return;
+    try {
+      if (isPlaying) {
+        playerRef.current.pauseVideo();
+      } else {
+        playerRef.current.playVideo();
+      }
+    } catch (e) {}
   };
 
   const handleSeekDelta = (deltaSeconds: number) => {
-    if (!playerRef.current) return;
-    const target = Math.max(0, currentTime + deltaSeconds);
-    playerRef.current.seekTo(target, true);
+    if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
+    try {
+      const target = Math.max(0, currentTime + deltaSeconds);
+      playerRef.current.seekTo(target, true);
+    } catch (e) {}
   };
 
   const handleSeekToSegment = (seg: TranscriptSegment) => {
-    if (!playerRef.current) return;
-    playerRef.current.seekTo(seg.start_time, true);
-    playerRef.current.playVideo();
+    if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
+    try {
+      playerRef.current.seekTo(seg.start_time, true);
+      playerRef.current.playVideo();
+    } catch (e) {}
   };
 
   const handleRepeatCurrent = () => {
-    if (!video?.segments || !playerRef.current) return;
-    const activeSeg = video.segments.find((s) => s.id === activeSegmentId);
-    if (activeSeg) {
-      playerRef.current.seekTo(activeSeg.start_time, true);
-      playerRef.current.playVideo();
-    } else {
-      handleSeekDelta(-5);
-    }
+    if (!displayedSegments.length || !playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
+    const activeSeg = displayedSegments.find((s) => s.id === activeSegmentId);
+    try {
+      if (activeSeg) {
+        playerRef.current.seekTo(activeSeg.start_time, true);
+        playerRef.current.playVideo();
+      } else {
+        handleSeekDelta(-5);
+      }
+    } catch (e) {}
   };
 
   const handleChangePlaybackRate = (rate: number) => {
-    if (!playerRef.current) return;
-    playerRef.current.setPlaybackRate(rate);
-    setPlaybackRate(rate);
+    if (!playerRef.current || typeof playerRef.current.setPlaybackRate !== 'function') return;
+    try {
+      playerRef.current.setPlaybackRate(rate);
+      setPlaybackRate(rate);
+    } catch (e) {}
   };
 
-  // Save Phrase Action
-  const handleSavePhrase = async (seg: TranscriptSegment, e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Save Phrase Action - Automatically gets Portuguese translation!
+  const handleSavePhrase = async (seg: TranscriptSegment, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!video) return;
 
-    if (savedSegmentIds.has(seg.id)) return; // Already saved
+    const baseSegmentId = seg.id.includes('_p') ? seg.id.split('_p')[0] : seg.id;
+    if (savedSegmentIds.has(seg.id) || savedSegmentIds.has(baseSegmentId)) return;
 
     try {
       setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: true }));
+
+      // Automatically translate if not already cached
+      let translationToSave = translations[seg.id];
+      if (!translationToSave) {
+        try {
+          const res = await aiService.translate(seg.text);
+          if (res.translation && res.translation.toLowerCase() !== seg.text.toLowerCase()) {
+            translationToSave = res.translation;
+            setTranslations((prev) => ({ ...prev, [seg.id]: res.translation }));
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       await phraseService.savePhrase({
         video_id: video.id,
-        transcript_segment_id: seg.id,
+        transcript_segment_id: baseSegmentId,
         text: seg.text,
-        translation: translations[seg.id] || null,
+        translation: translationToSave || null,
         context_sentence: seg.text,
         timestamp: seg.start_time,
         phrase_type: 'SENTENCE',
         difficulty: 'NORMAL',
       });
 
-      setSavedSegmentIds((prev) => new Set([...prev, seg.id]));
+      setSavedSegmentIds((prev) => new Set([...prev, seg.id, baseSegmentId]));
     } catch (err: any) {
       alert(err.message || 'Falha ao salvar frase.');
     } finally {
@@ -330,7 +435,6 @@ export const VideoStudy: React.FC = () => {
   const handleToggleTranslate = async (seg: TranscriptSegment, e: React.MouseEvent) => {
     e.stopPropagation();
     if (translations[seg.id]) {
-      // Toggle off
       setTranslations((prev) => {
         const next = { ...prev };
         delete next[seg.id];
@@ -347,6 +451,75 @@ export const VideoStudy: React.FC = () => {
       alert('Não foi possível traduzir a frase neste momento.');
     } finally {
       setTranslatingIds((prev) => ({ ...prev, [seg.id]: false }));
+    }
+  };
+
+  // Open Edit Segment Modal
+  const handleOpenEditModal = (seg: TranscriptSegment, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSeg(seg);
+    setEditText(seg.text);
+    if (translations[seg.id]) {
+      setEditTranslation(translations[seg.id]);
+    } else {
+      setEditTranslation('');
+      aiService.translate(seg.text).then((res) => {
+        if (res.translation && res.translation.toLowerCase() !== seg.text.toLowerCase()) {
+          setEditTranslation(res.translation);
+          setTranslations((prev) => ({ ...prev, [seg.id]: res.translation }));
+        }
+      }).catch(() => {});
+    }
+  };
+
+  // AI Translate inside Edit Modal
+  const handleAiTranslateModal = async () => {
+    if (!editText.trim()) return;
+    try {
+      setAiTranslatingEdit(true);
+      const res = await aiService.translate(editText);
+      if (res.translation) {
+        setEditTranslation(res.translation);
+      }
+    } catch (err) {
+      // ignore
+    } finally {
+      setAiTranslatingEdit(false);
+    }
+  };
+
+  // Save Custom Edited Phrase
+  const handleSaveCustomPhrase = async () => {
+    if (!editingSeg || !video) return;
+    if (!editText.trim()) {
+      alert('O texto não pode ficar vazio.');
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      const baseSegmentId = editingSeg.id.includes('_p') ? editingSeg.id.split('_p')[0] : editingSeg.id;
+
+      await phraseService.savePhrase({
+        video_id: video.id,
+        transcript_segment_id: baseSegmentId,
+        text: editText.trim(),
+        translation: editTranslation.trim() || null,
+        context_sentence: editingSeg.text,
+        timestamp: editingSeg.start_time,
+        phrase_type: 'SENTENCE',
+        difficulty: 'NORMAL',
+      });
+
+      if (editTranslation.trim()) {
+        setTranslations((prev) => ({ ...prev, [editingSeg.id]: editTranslation.trim() }));
+      }
+      setSavedSegmentIds((prev) => new Set([...prev, editingSeg.id, baseSegmentId]));
+      setEditingSeg(null);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao salvar frase personalizada.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -378,7 +551,7 @@ export const VideoStudy: React.FC = () => {
   };
 
   // Filtered segments
-  const filteredSegments = (video?.segments || []).filter((seg) =>
+  const filteredSegments = displayedSegments.filter((seg) =>
     seg.text.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -501,7 +674,7 @@ export const VideoStudy: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             <span>{video.channel || 'YouTube'}</span>
             <span>•</span>
-            <span>{video.segments?.length || 0} frases sincronizadas</span>
+            <span>{displayedSegments.length} frases {shortSentencesMode ? '(curtas)' : ''}</span>
           </div>
         </div>
       </div>
@@ -515,11 +688,34 @@ export const VideoStudy: React.FC = () => {
               <Sparkles size={15} color="var(--primary)" />
               Transcrição Sincronizada
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {/* Short Sentences Mode Toggle */}
+              <button
+                onClick={() => setShortSentencesMode(!shortSentencesMode)}
+                className={`control-btn ${shortSentencesMode ? 'active' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                title="Dividir frases longas em trechos curtos para facilitar o estudo"
+              >
+                <Scissors size={12} style={{ marginRight: '3px' }} />
+                Frases Curtas {shortSentencesMode ? 'ON' : 'OFF'}
+              </button>
+
+              {/* Live Auto-Translate Toggle */}
+              <button
+                onClick={() => setAutoTranslate(!autoTranslate)}
+                className={`control-btn ${autoTranslate ? 'active' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                title="Traduzir legendas automaticamente ao vivo"
+              >
+                <Languages size={12} style={{ marginRight: '3px' }} />
+                Auto-traduzir {autoTranslate ? 'ON' : 'OFF'}
+              </button>
+
+              {/* Auto Scroll Toggle */}
               <button
                 onClick={() => setAutoScroll(!autoScroll)}
                 className={`control-btn ${autoScroll ? 'active' : ''}`}
-                style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
                 title="Rolar lista automaticamente acompanhando a fala"
               >
                 Auto-scroll {autoScroll ? 'ON' : 'OFF'}
@@ -556,7 +752,8 @@ export const VideoStudy: React.FC = () => {
           ) : (
             filteredSegments.map((seg) => {
               const isActive = seg.id === activeSegmentId;
-              const isSaved = savedSegmentIds.has(seg.id);
+              const baseId = seg.id.includes('_p') ? seg.id.split('_p')[0] : seg.id;
+              const isSaved = savedSegmentIds.has(seg.id) || savedSegmentIds.has(baseId);
               const isSaving = !!savingSegmentIds[seg.id];
               const isTranslating = !!translatingIds[seg.id];
               const translation = translations[seg.id];
@@ -601,6 +798,15 @@ export const VideoStudy: React.FC = () => {
                         )}
                       </button>
 
+                      {/* Editar texto ou tradução antes/depois de salvar */}
+                      <button
+                        className="action-btn"
+                        onClick={(e) => handleOpenEditModal(seg, e)}
+                        title="Editar frase ou tradução"
+                      >
+                        <Edit3 size={14} color="var(--primary-light)" />
+                      </button>
+
                       {/* Explicar com IA */}
                       <button
                         className="action-btn"
@@ -643,6 +849,93 @@ export const VideoStudy: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* SEGMENT EDIT MODAL */}
+      {editingSeg && (
+        <div className="ai-modal-overlay" onClick={() => setEditingSeg(null)}>
+          <div className="ai-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <div className="flex-between" style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '1.1rem' }}>
+                <Edit3 size={18} color="var(--primary)" />
+                <span>Personalizar Frase</span>
+              </div>
+              <button
+                onClick={() => setEditingSeg(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                Frase em Inglês (você pode encurtar ou selecionar apenas uma palavra):
+              </label>
+              <textarea
+                className="form-input"
+                rows={2}
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                style={{ fontSize: '0.95rem' }}
+              />
+            </div>
+
+            <div className="form-group">
+              <div className="flex-between" style={{ marginBottom: '0.3rem' }}>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>
+                  Tradução em Português:
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAiTranslateModal}
+                  disabled={aiTranslatingEdit}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent-cyan)',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem'
+                  }}
+                >
+                  {aiTranslatingEdit ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  <span>Traduzir com IA</span>
+                </button>
+              </div>
+              <textarea
+                className="form-input"
+                rows={2}
+                placeholder="Tradução em português..."
+                value={editTranslation}
+                onChange={(e) => setEditTranslation(e.target.value)}
+                style={{ fontSize: '0.95rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+              <button
+                type="button"
+                onClick={() => setEditingSeg(null)}
+                className="btn btn-secondary"
+                disabled={savingEdit}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCustomPhrase}
+                className="btn btn-primary"
+                disabled={savingEdit}
+              >
+                {savingEdit ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                <span>Salvar Frase no Deck</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Explanation Modal */}
       {explainingSegment && (
