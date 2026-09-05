@@ -9,6 +9,7 @@ import { Videos } from './pages/Videos/Videos';
 import { Phrases } from './pages/Phrases/Phrases';
 import { Reviews } from './pages/Reviews/Reviews';
 import { Progress } from './pages/Progress/Progress';
+import { VideoStudy } from './pages/VideoStudy/VideoStudy';
 
 export const App: React.FC = () => {
   return (
@@ -24,6 +25,7 @@ export const App: React.FC = () => {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/videos" element={<Videos />} />
+            <Route path="/videos/:id" element={<VideoStudy />} />
             <Route path="/phrases" element={<Phrases />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/progress" element={<Progress />} />
