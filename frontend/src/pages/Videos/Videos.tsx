@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { videoService } from '../../services/videos';
 import { Video } from '../../types/video';
-import { Plus, Video as VideoIcon, Music, Trash2, ExternalLink } from 'lucide-react';
+import { Plus, Video as VideoIcon, Music, Trash2, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+
+type ProcessingStep = 'idle' | 'fetching' | 'transcribing' | 'saving' | 'ready' | 'error';
 
 export const Videos: React.FC = () => {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -10,8 +12,9 @@ export const Videos: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [url, setUrl] = useState('');
   const [category, setCategory] = useState<'video' | 'music'>('video');
-  const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [step, setStep] = useState<ProcessingStep>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [createdVideo, setCreatedVideo] = useState<Video | null>(null);
   const navigate = useNavigate();
 
   const loadVideos = async () => {
@@ -29,9 +32,51 @@ export const Videos: React.FC = () => {
     loadVideos();
   }, []);
 
+  const handleProcessVideo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    setErrorMessage(null);
+    setStep('fetching');
+
+    try {
+      // Step simulation for rich feedback during server processing
+      const fetchTimer = setTimeout(() => {
+        setStep('transcribing');
+      }, 1200);
+
+      const savingTimer = setTimeout(() => {
+        setStep('saving');
+      }, 2400);
+
+      const video = await videoService.createVideo({ url, category });
+
+      clearTimeout(fetchTimer);
+      clearTimeout(savingTimer);
+
+      setCreatedVideo(video);
+      setStep('ready');
+      setVideos((prev) => [video, ...prev.filter((v) => v.id !== video.id)]);
+    } catch (err: any) {
+      setStep('error');
+      setErrorMessage(
+        err.message ||
+        'Não foi possível obter uma transcrição para este vídeo. Certifique-se de que o vídeo possui legendas disponíveis no YouTube.'
+      );
+    }
+  };
+
+  const resetModal = () => {
+    setShowAddModal(false);
+    setUrl('');
+    setStep('idle');
+    setErrorMessage(null);
+    setCreatedVideo(null);
+  };
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Tem certeza que deseja remover este vídeo?')) return;
+    if (!window.confirm('Tem certeza que deseja remover este vídeo da sua biblioteca?')) return;
     try {
       await videoService.deleteVideo(id);
       setVideos(videos.filter((v) => v.id !== id));
@@ -59,53 +104,168 @@ export const Videos: React.FC = () => {
         </button>
       </div>
 
+      {/* Modal / Card para Adicionar Vídeo */}
       {showAddModal && (
-        <div className="card" style={{ marginBottom: '1.5rem', border: '1px solid var(--border-focus)' }}>
-          <h2 style={{ fontSize: '1.15rem', marginBottom: '0.75rem' }}>Adicionar Link do YouTube</h2>
-          {error && <p style={{ color: 'var(--accent-rose)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-          <div className="form-group">
-            <input
-              type="url"
-              className="form-input"
-              placeholder="https://www.youtube.com/watch?v=..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="category"
-                checked={category === 'video'}
-                onChange={() => setCategory('video')}
-              />
-              <span>🎬 Vídeo (Podcast / Aula)</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="category"
-                checked={category === 'music'}
-                onChange={() => setCategory('music')}
-              />
-              <span>🎵 Música / Lyric</span>
-            </label>
-          </div>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-            <button
-              onClick={() => { setShowAddModal(false); setError(null); }}
-              className="btn btn-secondary"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={() => alert('O motor de extração de legendas e sincronização será ativado na ETAPA 2!')}
-              className="btn btn-primary"
-            >
-              Processar Vídeo
-            </button>
-          </div>
+        <div className="card" style={{ marginBottom: '1.75rem', border: '1px solid var(--border-focus)', background: 'var(--gradient-card)' }}>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.4rem' }}>Adicionar Vídeo do YouTube</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1.25rem' }}>
+            Cole o link de qualquer vídeo ou podcast em inglês do YouTube.
+          </p>
+
+          {step === 'idle' && (
+            <form onSubmit={handleProcessVideo}>
+              <div className="form-group">
+                <input
+                  type="url"
+                  required
+                  className="form-input"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.25rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="radio"
+                    name="category"
+                    checked={category === 'video'}
+                    onChange={() => setCategory('video')}
+                  />
+                  <span>🎬 Vídeo (Podcast / Aula / Entrevista)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="radio"
+                    name="category"
+                    checked={category === 'music'}
+                    onChange={() => setCategory('music')}
+                  />
+                  <span>🎵 Música / Canção</span>
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={resetModal}
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  <span>Processar Vídeo</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Progress Indicator */}
+          {(step === 'fetching' || step === 'transcribing' || step === 'saving') && (
+            <div style={{ padding: '1rem 0' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'fetching' ? 'var(--primary)' : 'var(--accent-emerald)' }}>
+                  {step === 'fetching' ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
+                    {step === 'fetching' ? 'Buscando metadados do vídeo...' : '✓ Vídeo identificado no YouTube'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'transcribing' ? 'var(--primary)' : (step === 'saving' ? 'var(--accent-emerald)' : 'var(--text-muted)') }}>
+                  {step === 'transcribing' ? <Loader2 size={18} className="animate-spin" /> : (step === 'saving' ? <CheckCircle2 size={18} /> : <div style={{ width: 18 }} />)}
+                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
+                    {step === 'transcribing' ? 'Obtendo e dividindo transcrição em frases...' : (step === 'saving' ? '✓ Transcrição segmentada' : 'Processamento da transcrição')}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'saving' ? 'var(--primary)' : 'var(--text-muted)' }}>
+                  {step === 'saving' ? <Loader2 size={18} className="animate-spin" /> : <div style={{ width: 18 }} />}
+                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
+                    {step === 'saving' ? 'Preparando lição e sincronização...' : 'Preparando lição'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Ready Step */}
+          {step === 'ready' && createdVideo && (
+            <div style={{ padding: '0.5rem 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'var(--accent-emerald)', marginBottom: '1rem' }}>
+                <CheckCircle2 size={24} />
+                <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>Lição pronta para estudo!</span>
+              </div>
+
+              <div className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.25rem', background: 'var(--bg-glass)' }}>
+                {createdVideo.thumbnail_url && (
+                  <img
+                    src={createdVideo.thumbnail_url}
+                    alt={createdVideo.title}
+                    style={{ width: '90px', height: '54px', objectFit: 'cover', borderRadius: 'var(--radius-sm)' }}
+                  />
+                )}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{createdVideo.title}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{createdVideo.channel}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <button onClick={resetModal} className="btn btn-secondary">
+                  Fechar
+                </button>
+                <button
+                  onClick={() => navigate(`/videos/${createdVideo.id}`)}
+                  className="btn btn-primary"
+                >
+                  <span>Começar a Estudar</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Step */}
+          {step === 'error' && (
+            <div style={{ padding: '0.5rem 0' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.75rem',
+                padding: '1rem',
+                background: 'rgba(244, 63, 94, 0.12)',
+                border: '1px solid rgba(244, 63, 94, 0.3)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--accent-rose)',
+                fontSize: '0.9rem',
+                marginBottom: '1.25rem'
+              }}>
+                <AlertCircle size={22} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>Não foi possível processar</div>
+                  <div>{errorMessage}</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '0.5rem' }}>
+                    Dica: Escolha vídeos do YouTube que possuam legendas (CC / Closed Captions) ativadas pelo canal ou legendas automáticas em inglês.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button onClick={resetModal} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button onClick={() => setStep('idle')} className="btn btn-primary">
+                  Tentar outro link
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
