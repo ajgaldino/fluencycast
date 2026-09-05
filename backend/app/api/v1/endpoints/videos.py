@@ -8,7 +8,13 @@ from app.models.user import User
 from app.models.video import Video
 from app.models.transcript import TranscriptSegment
 from app.schemas.video import VideoCreate, VideoResponse, VideoDetailResponse
-from app.services.youtube import extract_video_id, get_video_metadata, fetch_transcript, segment_transcript
+from app.services.youtube import (
+    extract_video_id,
+    get_video_metadata,
+    fetch_transcript,
+    segment_transcript,
+    parse_transcript_text
+)
 
 router = APIRouter()
 
@@ -67,15 +73,18 @@ def create_video(
 
     # 2. Fetch transcript & segment
     try:
-        raw_items = fetch_transcript(video_id)
-        segments_data = segment_transcript(raw_items)
+        if video_in.raw_transcript and video_in.raw_transcript.strip():
+            segments_data = parse_transcript_text(video_in.raw_transcript)
+        else:
+            raw_items = fetch_transcript(video_id)
+            segments_data = segment_transcript(raw_items)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     if not segments_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Não foi possível obter uma transcrição para este vídeo. Certifique-se de que o vídeo possui legendas ativadas no YouTube."
+            detail="Não foi possível obter uma transcrição para este vídeo. Certifique-se de que o vídeo possui legendas ativadas no YouTube ou cole a transcrição manualmente."
         )
 
     duration = segments_data[-1]["end_time"] if segments_data else 0.0

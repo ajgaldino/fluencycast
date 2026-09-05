@@ -25,4 +25,5 @@ export interface Video {
 export interface VideoCreatePayload {
   url: string;
   category?: "video" | "music";
+  raw_transcript?: string;
 }

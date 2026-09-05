@@ -1,10 +1,56 @@
 import React, { useState, useEffect } from 'react';
 import { videoService } from '../../services/videos';
 import { Video } from '../../types/video';
-import { Plus, Video as VideoIcon, Music, Trash2, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import { Plus, Video as VideoIcon, Trash2, CheckCircle2, AlertCircle, Loader2, ArrowRight, FileText, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 type ProcessingStep = 'idle' | 'fetching' | 'transcribing' | 'saving' | 'ready' | 'error';
+
+const SAMPLE_CONTENTS = [
+  {
+    title: "Steve Jobs - Stanford Speech (2005)",
+    channel: "Stanford University",
+    url: "https://www.youtube.com/watch?v=UF8uR6Z6KLc",
+    category: "video" as const,
+    transcript: `0:00 I am honored to be with you today at your commencement from one of the finest universities in the world.
+0:08 Truth be told, I never graduated from college.
+0:13 This is the closest I've ever gotten to a college graduation.
+0:18 Today I want to tell you three stories from my life.
+0:23 That's it. No big deal. Just three stories.
+0:29 The first story is about connecting the dots.
+0:35 You can't connect the dots looking forward; you can only connect them looking backwards.
+0:42 So you have to trust that the dots will somehow connect in your future.
+0:48 You have to trust in something: your gut, destiny, life, karma, whatever.
+0:56 This approach has never let me down, and it has made all the difference in my life.`
+  },
+  {
+    title: "How I Learned English Fast",
+    channel: "English Fluency Journey",
+    url: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+    category: "video" as const,
+    transcript: `0:01 Welcome back to the channel.
+0:05 Today I want to talk about how I improved my listening skills.
+0:11 When I was younger, I used to travel a lot with my family.
+0:17 I watched real interviews and listened to podcasts every single day.
+0:24 Consistency was the key to unlocking my fluency.`
+  },
+  {
+    title: "Imagine - John Lennon",
+    channel: "John Lennon",
+    url: "https://www.youtube.com/watch?v=YkgkThdzX-8",
+    category: "music" as const,
+    transcript: `0:03 Imagine there's no heaven
+0:09 It's easy if you try
+0:15 No hell below us
+0:21 Above us, only sky
+0:27 Imagine all the people
+0:33 Livin' for today
+0:40 Imagine there's no countries
+0:46 It isn't hard to do
+0:52 Nothing to kill or die for
+0:58 And no religion, too`
+  }
+];
 
 export const Videos: React.FC = () => {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -12,6 +58,8 @@ export const Videos: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [url, setUrl] = useState('');
   const [category, setCategory] = useState<'video' | 'music'>('video');
+  const [manualTranscript, setManualTranscript] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
   const [step, setStep] = useState<ProcessingStep>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdVideo, setCreatedVideo] = useState<Video | null>(null);
@@ -32,24 +80,26 @@ export const Videos: React.FC = () => {
     loadVideos();
   }, []);
 
-  const handleProcessVideo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!url.trim()) return;
+  const handleProcessVideo = async (e?: React.FormEvent, customPayload?: { url: string; category: 'video' | 'music'; raw_transcript?: string }) => {
+    if (e) e.preventDefault();
+    const targetUrl = customPayload?.url || url;
+    const targetCategory = customPayload?.category || category;
+    const targetTranscript = customPayload?.raw_transcript || (showManualInput ? manualTranscript : undefined);
+
+    if (!targetUrl.trim()) return;
 
     setErrorMessage(null);
     setStep('fetching');
 
     try {
-      // Step simulation for rich feedback during server processing
-      const fetchTimer = setTimeout(() => {
-        setStep('transcribing');
-      }, 1200);
+      const fetchTimer = setTimeout(() => setStep('transcribing'), 1000);
+      const savingTimer = setTimeout(() => setStep('saving'), 2000);
 
-      const savingTimer = setTimeout(() => {
-        setStep('saving');
-      }, 2400);
-
-      const video = await videoService.createVideo({ url, category });
+      const video = await videoService.createVideo({
+        url: targetUrl,
+        category: targetCategory,
+        raw_transcript: targetTranscript
+      });
 
       clearTimeout(fetchTimer);
       clearTimeout(savingTimer);
@@ -59,16 +109,32 @@ export const Videos: React.FC = () => {
       setVideos((prev) => [video, ...prev.filter((v) => v.id !== video.id)]);
     } catch (err: any) {
       setStep('error');
-      setErrorMessage(
-        err.message ||
-        'Não foi possível obter uma transcrição para este vídeo. Certifique-se de que o vídeo possui legendas disponíveis no YouTube.'
-      );
+      const msg = err.message || 'Falha ao processar vídeo';
+      setErrorMessage(msg);
+      // If blocked by YouTube or no transcript found, automatically offer manual paste
+      if (msg.includes('Render IP ban') || msg.includes('bloqueou') || msg.includes('legendas')) {
+        setShowManualInput(true);
+      }
     }
+  };
+
+  const handleSelectSample = (sample: typeof SAMPLE_CONTENTS[0]) => {
+    setUrl(sample.url);
+    setCategory(sample.category);
+    setManualTranscript(sample.transcript);
+    setShowManualInput(true);
+    handleProcessVideo(undefined, {
+      url: sample.url,
+      category: sample.category,
+      raw_transcript: sample.transcript
+    });
   };
 
   const resetModal = () => {
     setShowAddModal(false);
     setUrl('');
+    setManualTranscript('');
+    setShowManualInput(false);
     setStep('idle');
     setErrorMessage(null);
     setCreatedVideo(null);
@@ -109,11 +175,11 @@ export const Videos: React.FC = () => {
         <div className="card" style={{ marginBottom: '1.75rem', border: '1px solid var(--border-focus)', background: 'var(--gradient-card)' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '0.4rem' }}>Adicionar Vídeo do YouTube</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1.25rem' }}>
-            Cole o link de qualquer vídeo ou podcast em inglês do YouTube.
+            Cole o link de qualquer vídeo ou música em inglês do YouTube.
           </p>
 
           {step === 'idle' && (
-            <form onSubmit={handleProcessVideo}>
+            <form onSubmit={(e) => handleProcessVideo(e)}>
               <div className="form-group">
                 <input
                   type="url"
@@ -134,7 +200,7 @@ export const Videos: React.FC = () => {
                     checked={category === 'video'}
                     onChange={() => setCategory('video')}
                   />
-                  <span>🎬 Vídeo (Podcast / Aula / Entrevista)</span>
+                  <span>🎬 Vídeo (Podcast / Aula)</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.9rem' }}>
                   <input
@@ -145,6 +211,59 @@ export const Videos: React.FC = () => {
                   />
                   <span>🎵 Música / Canção</span>
                 </label>
+              </div>
+
+              {/* Botão para colar transcrição manual */}
+              {!showManualInput && (
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowManualInput(true)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-link)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                  >
+                    <FileText size={15} />
+                    <span>Prefere colar a transcrição ou letra manualmente?</span>
+                  </button>
+                </div>
+              )}
+
+              {showManualInput && (
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label className="form-label">
+                    Transcrição ou Letra (com ou sem timestamps do YouTube):
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows={5}
+                    placeholder={`Cole aqui a transcrição copiada do YouTube (ex: 0:12 Hello world) ou letra da música...`}
+                    value={manualTranscript}
+                    onChange={(e) => setManualTranscript(e.target.value)}
+                    style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                  />
+                </div>
+              )}
+
+              {/* Quick Samples */}
+              <div style={{ padding: '0.85rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem', fontWeight: 600 }}>
+                  <Sparkles size={14} color="var(--accent-amber)" />
+                  <span>OU ESCOLHA UM CONTEÚDO VERIFICADO PARA TESTAR AGORA:</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {SAMPLE_CONTENTS.map((sample, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectSample(sample)}
+                      className="btn btn-secondary"
+                      style={{ justifyContent: 'flex-start', padding: '0.45rem 0.75rem', fontSize: '0.85rem' }}
+                    >
+                      <span>{sample.category === 'music' ? '🎵' : '🎬'}</span>
+                      <span style={{ fontWeight: 600 }}>{sample.title}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: 'auto' }}>{sample.channel}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
@@ -231,7 +350,7 @@ export const Videos: React.FC = () => {
             </div>
           )}
 
-          {/* Error Step */}
+          {/* Error Step with direct Paste Fallback */}
           {step === 'error' && (
             <div style={{ padding: '0.5rem 0' }}>
               <div style={{
@@ -248,20 +367,44 @@ export const Videos: React.FC = () => {
               }}>
                 <AlertCircle size={22} style={{ flexShrink: 0, marginTop: '2px' }} />
                 <div>
-                  <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>Não foi possível processar</div>
+                  <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>Aviso de Transcrição</div>
                   <div>{errorMessage}</div>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '0.5rem' }}>
-                    Dica: Escolha vídeos do YouTube que possuam legendas (CC / Closed Captions) ativadas pelo canal ou legendas automáticas em inglês.
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.84rem', marginTop: '0.5rem' }}>
+                    Como os servidores em nuvem (Render/AWS) sofrem bloqueio de IP do YouTube, você pode colar a transcrição diretamente do vídeo abaixo:
                   </div>
                 </div>
+              </div>
+
+              {/* Paste fallback box */}
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label" style={{ color: '#fff', fontWeight: 600 }}>
+                  📋 Cole a Transcrição do Vídeo aqui:
+                </label>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: '0.5rem' }}>
+                  No YouTube, clique em "... Mais" abaixo do vídeo &gt; "Mostrar transcrição", copie e cole aqui:
+                </p>
+                <textarea
+                  className="form-input"
+                  rows={6}
+                  placeholder={`0:00 Hello everyone\n0:05 Today we learn English...`}
+                  value={manualTranscript}
+                  onChange={(e) => setManualTranscript(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                />
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
                 <button onClick={resetModal} className="btn btn-secondary">
                   Cancelar
                 </button>
-                <button onClick={() => setStep('idle')} className="btn btn-primary">
-                  Tentar outro link
+                <button
+                  type="button"
+                  onClick={() => handleProcessVideo(undefined, { url, category, raw_transcript: manualTranscript })}
+                  className="btn btn-primary"
+                  disabled={!manualTranscript.trim()}
+                >
+                  <span>Processar Transcrição Colada</span>
+                  <ArrowRight size={16} />
                 </button>
               </div>
             </div>

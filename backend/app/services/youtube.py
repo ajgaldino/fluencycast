@@ -207,3 +207,74 @@ def segment_transcript(raw_items: List[Dict[str, Any]], max_gap_seconds: float =
     finish_segment()
 
     return segmented
+
+
+def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
+    """
+    Parses manually pasted transcript text into structured segments:
+    - Supports timestamped lines like '0:12 Some sentence' or '0:12\\nSome sentence'
+    - Supports plain text (lyrics / sentences without timestamps)
+    """
+    if not text or not text.strip():
+        return []
+
+    lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
+    segments = []
+
+    has_timestamps = any(re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', line) for line in lines)
+
+    if has_timestamps:
+        curr_time = None
+        curr_text = []
+
+        for line in lines:
+            # Inline: 0:15 text or 1:02:15 text
+            m_inline = re.match(r'^(?:(?:(\d{1,2}):)?(\d{1,2}):(\d{2}))\s+(.+)$', line)
+            # Standalone: 0:15 or 1:02:15
+            m_alone = re.match(r'^(?:(?:(\d{1,2}):)?(\d{1,2}):(\d{2}))$', line)
+
+            if m_inline:
+                if curr_time is not None and curr_text:
+                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+                    curr_text = []
+                h = int(m_inline.group(1) or 0)
+                m_ = int(m_inline.group(2))
+                s = int(m_inline.group(3))
+                curr_time = h * 3600 + m_ * 60 + s
+                curr_text = [m_inline.group(4)]
+            elif m_alone:
+                if curr_time is not None and curr_text:
+                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+                    curr_text = []
+                h = int(m_alone.group(1) or 0)
+                m_ = int(m_alone.group(2))
+                s = int(m_alone.group(3))
+                curr_time = h * 3600 + m_ * 60 + s
+            else:
+                if curr_time is not None:
+                    curr_text.append(line)
+
+        if curr_time is not None and curr_text:
+            segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+
+        for i in range(len(segments)):
+            end = segments[i + 1]['start'] if i + 1 < len(segments) else segments[i]['start'] + 4.0
+            segments[i]['end'] = round(max(end, segments[i]['start'] + 1.0), 2)
+            segments[i]['sequence'] = i + 1
+            segments[i]['start_time'] = float(segments[i]['start'])
+            segments[i]['end_time'] = float(segments[i]['end'])
+    else:
+        # Plain text without timestamps
+        start = 0.0
+        for i, line in enumerate(lines):
+            dur = max(2.5, len(line.split()) * 0.45)
+            segments.append({
+                'sequence': i + 1,
+                'start_time': round(start, 2),
+                'end_time': round(start + dur, 2),
+                'text': line
+            })
+            start += dur
+
+    return segments
+

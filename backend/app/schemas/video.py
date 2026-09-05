@@ -7,6 +7,7 @@ from app.schemas.transcript import TranscriptSegmentResponse
 class VideoCreate(BaseModel):
     url: str
     category: Optional[str] = "video"  # "video" | "music"
+    raw_transcript: Optional[str] = None
 
 
 class VideoResponse(BaseModel):
