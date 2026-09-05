@@ -181,6 +181,7 @@ export const VideoStudy: React.FC = () => {
   const transcriptListRef = useRef<HTMLDivElement>(null);
   const activeCardRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<any>(null);
+  const pauseAtTimeRef = useRef<number | null>(null);
 
   // 1. Fetch Video & Saved Phrases
   useEffect(() => {
@@ -327,6 +328,14 @@ export const VideoStudy: React.FC = () => {
         if (typeof time === 'number' && !isNaN(time)) {
           setCurrentTime(time);
 
+          // Pause video automatically when snippet ends (for dictation quiz or speaker button)
+          if (pauseAtTimeRef.current !== null && time >= pauseAtTimeRef.current - 0.2) {
+            pauseAtTimeRef.current = null;
+            playerRef.current.pauseVideo();
+            setIsPlaying(false);
+            return;
+          }
+
           if (displayedSegments.length > 0) {
             const seg = displayedSegments.find(
               (s) => time >= s.start_time && time < s.end_time
@@ -377,29 +386,41 @@ export const VideoStudy: React.FC = () => {
     }).catch(() => {});
   }, [activeSegmentId, autoTranslate, displayedSegments]);
 
-  // 4. Auto-Scroll to Active Segment
+  // 4. Auto-Scroll to Active Segment (Smoothly and precisely centered in viewport)
   useEffect(() => {
     if (!autoScroll || !activeSegmentId) return;
 
-    if (activeCardRef.current && transcriptListRef.current) {
+    // Use requestAnimationFrame so that layout and DOM styles have rendered
+    const frameId = requestAnimationFrame(() => {
       const container = transcriptListRef.current;
       const element = activeCardRef.current;
+      if (!container || !element) return;
 
-      const elementTop = element.offsetTop;
-      const elementHeight = element.offsetHeight;
-      const containerHeight = container.clientHeight;
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
 
-      container.scrollTo({
-        top: elementTop - containerHeight / 2 + elementHeight / 2,
-        behavior: 'smooth',
-      });
-    }
+      // Absolute distance from center of element to center of scroll container
+      const elementCenter = elementRect.top + elementRect.height / 2;
+      const containerCenter = containerRect.top + containerRect.height / 2;
+      const diff = elementCenter - containerCenter;
+
+      // Only scroll if there is a noticeable misalignment (> 5px)
+      if (Math.abs(diff) > 5) {
+        container.scrollTo({
+          top: container.scrollTop + diff,
+          behavior: 'smooth',
+        });
+      }
+    });
+
+    return () => cancelAnimationFrame(frameId);
   }, [activeSegmentId, autoScroll]);
 
   // Player controls
   const handleTogglePlay = () => {
     if (!playerRef.current || typeof playerRef.current.playVideo !== 'function') return;
     try {
+      pauseAtTimeRef.current = null;
       if (isPlaying) {
         playerRef.current.pauseVideo();
       } else {
@@ -411,6 +432,7 @@ export const VideoStudy: React.FC = () => {
 
   const handleResumeFromAutoPause = () => {
     if (!playerRef.current) return;
+    pauseAtTimeRef.current = null;
     setIsPausedForShadowing(false);
     playerRef.current.playVideo();
   };
@@ -418,6 +440,7 @@ export const VideoStudy: React.FC = () => {
   const handleSeekDelta = (deltaSeconds: number) => {
     if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
     try {
+      pauseAtTimeRef.current = null;
       const target = Math.max(0, currentTime + deltaSeconds);
       playerRef.current.seekTo(target, true);
     } catch (e) {}
@@ -426,8 +449,21 @@ export const VideoStudy: React.FC = () => {
   const handleSeekToSegment = (seg: TranscriptSegment) => {
     if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
     try {
+      pauseAtTimeRef.current = null;
       lastPausedSegRef.current = null;
       setIsPausedForShadowing(false);
+      playerRef.current.seekTo(seg.start_time, true);
+      playerRef.current.playVideo();
+    } catch (e) {}
+  };
+
+  // Play ONLY this specific segment and pause when it ends
+  const handlePlaySegmentOnly = (seg: TranscriptSegment) => {
+    if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
+    try {
+      lastPausedSegRef.current = null;
+      setIsPausedForShadowing(false);
+      pauseAtTimeRef.current = seg.end_time;
       playerRef.current.seekTo(seg.start_time, true);
       playerRef.current.playVideo();
     } catch (e) {}
@@ -647,8 +683,8 @@ export const VideoStudy: React.FC = () => {
     setQuizAnswer(null);
     setQuizResult(null);
 
-    // Play the audio segment to help with dictation
-    handleSeekToSegment(seg);
+    // Play ONLY this audio segment and pause automatically when it finishes
+    handlePlaySegmentOnly(seg);
   };
 
   const handleSelectQuizOption = (option: string) => {
@@ -946,6 +982,16 @@ export const VideoStudy: React.FC = () => {
               Transcrição Interativa
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {/* Auto-Scroll Toggle */}
+              <button
+                onClick={() => setAutoScroll(!autoScroll)}
+                className={`control-btn ${autoScroll ? 'active' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                title="Rolar automaticamente para manter a frase falada centralizada"
+              >
+                Auto-scroll {autoScroll ? 'ON' : 'OFF'}
+              </button>
+
               {/* Auto-Pause Mode Toggle */}
               <button
                 onClick={() => setAutoPauseMode(!autoPauseMode)}
@@ -1042,14 +1088,14 @@ export const VideoStudy: React.FC = () => {
                     </span>
 
                     <div className="segment-actions">
-                      {/* Ouvir trecho nativo */}
+                      {/* Ouvir trecho nativo (toca e pausa) */}
                       <button
                         className="action-btn"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSeekToSegment(seg);
+                          handlePlaySegmentOnly(seg);
                         }}
-                        title="Tocar este trecho do vídeo"
+                        title="Tocar somente este trecho do vídeo"
                       >
                         <Volume2 size={15} />
                       </button>
@@ -1272,7 +1318,7 @@ export const VideoStudy: React.FC = () => {
 
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
               <button
-                onClick={() => handleSeekToSegment(quizSeg)}
+                onClick={() => handlePlaySegmentOnly(quizSeg)}
                 className="btn btn-secondary"
                 style={{ padding: '0.5rem 1rem' }}
               >
@@ -1345,7 +1391,13 @@ export const VideoStudy: React.FC = () => {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setQuizSeg(null)} className="btn btn-secondary">
+              <button
+                onClick={() => {
+                  pauseAtTimeRef.current = null;
+                  setQuizSeg(null);
+                }}
+                className="btn btn-secondary"
+              >
                 Concluir
               </button>
             </div>
