@@ -87,20 +87,32 @@ export const aiService = {
 
   async getWordInfo(word: string, context?: string): Promise<WordInfoResponse> {
     try {
-      return await request<WordInfoResponse>('/ai/word-info', {
+      const res = await request<WordInfoResponse>('/ai/word-info', {
         method: 'POST',
         body: JSON.stringify({ word, context }),
       });
+      if (
+        res &&
+        res.translation &&
+        res.translation !== 'palavra em inglês' &&
+        res.translation.toLowerCase() !== word.toLowerCase()
+      ) {
+        return res;
+      }
     } catch (e) {
-      const tr = await this.translate(word);
-      return {
-        word,
-        translation: tr.translation,
-        part_of_speech: 'termo',
-        definition: `Tradução: ${tr.translation}`,
-        example: context || word,
-      };
+      // Backend unavailable or rate-limited, fall back to robust client translator
     }
+
+    const tr = await this.translate(word);
+    const cleanW = word.trim().toLowerCase().replace(/[^a-zA-Z]/g, '');
+
+    return {
+      word: cleanW,
+      translation: tr.translation || cleanW,
+      part_of_speech: 'palavra',
+      definition: `Significa "${tr.translation || cleanW}" em português.`,
+      example: context || word,
+    };
   },
 
   async chatWithTutor(message: string, context?: string): Promise<ChatResponse> {

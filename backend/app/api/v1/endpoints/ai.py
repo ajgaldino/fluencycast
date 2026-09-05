@@ -143,6 +143,75 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
+    "think": {"translation": "pensar, achar, acreditar", "pos": "verbo"},
+    "look": {"translation": "olhar, parecer, buscar", "pos": "verbo"},
+    "get": {"translation": "obter, conseguir, ficar, entender", "pos": "verbo"},
+    "take": {"translation": "levar, tomar, pegar", "pos": "verbo"},
+    "see": {"translation": "ver, enxergar, entender", "pos": "verbo"},
+    "know": {"translation": "saber, conhecer", "pos": "verbo"},
+    "make": {"translation": "fazer, criar, tornar", "pos": "verbo"},
+    "say": {"translation": "dizer, falar", "pos": "verbo"},
+    "tell": {"translation": "contar, dizer a alguém", "pos": "verbo"},
+    "feel": {"translation": "sentir, achar", "pos": "verbo"},
+    "want": {"translation": "querer, desejar", "pos": "verbo"},
+    "need": {"translation": "precisar, necessitar", "pos": "verbo"},
+    "mean": {"translation": "significar, pretender", "pos": "verbo"},
+    "keep": {"translation": "manter, continuar", "pos": "verbo"},
+    "help": {"translation": "ajudar, ajuda", "pos": "verbo"},
+    "talk": {"translation": "conversar, falar", "pos": "verbo"},
+    "listen": {"translation": "ouvir, escutar", "pos": "verbo"},
+    "handle": {"translation": "lidar com, aguentar, manusear", "pos": "verbo"},
+    "deal": {"translation": "lidar, tratar, acordo", "pos": "verbo"},
+    "face": {"translation": "encarar, enfrentar, rosto", "pos": "verbo / substantivo"},
+    "run": {"translation": "correr, fugir, executar", "pos": "verbo"},
+    "walk": {"translation": "andar, caminhar", "pos": "verbo"},
+    "live": {"translation": "viver, morar", "pos": "verbo"},
+    "stay": {"translation": "ficar, permanecer", "pos": "verbo"},
+    "leave": {"translation": "deixar, partir, sair", "pos": "verbo"},
+    "stop": {"translation": "parar, interromper", "pos": "verbo"},
+    "start": {"translation": "começar, iniciar", "pos": "verbo"},
+    "try": {"translation": "tentar, experimentar", "pos": "verbo"},
+    "ask": {"translation": "perguntar, pedir", "pos": "verbo"},
+    "answer": {"translation": "responder, resposta", "pos": "verbo / substantivo"},
+    "question": {"translation": "pergunta, questionamento", "pos": "substantivo"},
+    "problem": {"translation": "problema, dificuldade", "pos": "substantivo"},
+    "time": {"translation": "tempo, hora, vez", "pos": "substantivo"},
+    "life": {"translation": "vida", "pos": "substantivo"},
+    "people": {"translation": "pessoas, gente", "pos": "substantivo"},
+    "friend": {"translation": "amigo, amiga", "pos": "substantivo"},
+    "coworker": {"translation": "colega de trabalho", "pos": "substantivo"},
+    "neighbor": {"translation": "vizinho, vizinha", "pos": "substantivo"},
+    "neighborhood": {"translation": "bairro, vizinhança", "pos": "substantivo"},
+    "family": {"translation": "família", "pos": "substantivo"},
+    "school": {"translation": "escola, colégio", "pos": "substantivo"},
+    "work": {"translation": "trabalhar, trabalho", "pos": "verbo / substantivo"},
+    "day": {"translation": "dia", "pos": "substantivo"},
+    "way": {"translation": "maneira, jeito, caminho", "pos": "substantivo"},
+    "thing": {"translation": "coisa, situação", "pos": "substantivo"},
+    "someone": {"translation": "alguém", "pos": "pronome"},
+    "everyone": {"translation": "todos, todo mundo", "pos": "pronome"},
+    "anyone": {"translation": "qualquer pessoa, ninguém", "pos": "pronome"},
+    "difficult": {"translation": "difícil, complicado", "pos": "adjetivo"},
+    "easy": {"translation": "fácil, simples", "pos": "adjetivo"},
+    "hard": {"translation": "difícil, duro, pesado", "pos": "adjetivo"},
+    "rude": {"translation": "rude, grosseiro, mal-educado", "pos": "adjetivo"},
+    "wonderful": {"translation": "maravilhoso, incrível", "pos": "adjetivo"},
+    "great": {"translation": "ótimo, excelente, grande", "pos": "adjetivo"},
+    "important": {"translation": "importante, relevante", "pos": "adjetivo"},
+    "carefully": {"translation": "cuidadosamente, com cuidado", "pos": "advérbio"},
+    "seriously": {"translation": "seriamente, falando sério", "pos": "advérbio"},
+    "always": {"translation": "sempre", "pos": "advérbio"},
+    "never": {"translation": "nunca, jamais", "pos": "advérbio"},
+    "sometimes": {"translation": "às vezes, de vez em quando", "pos": "advérbio"},
+    "really": {"translation": "realmente, muito, de verdade", "pos": "advérbio"},
+    "together": {"translation": "juntos, em conjunto", "pos": "advérbio"},
+    "away": {"translation": "longe, embora", "pos": "advérbio"},
+    "right": {"translation": "certo, correto, direito", "pos": "adjetivo"},
+    "wrong": {"translation": "errado, incorreto", "pos": "adjetivo"},
+}
+
+
 @router.post("/word-info", response_model=WordInfoResponse)
 def get_word_info(
     payload: WordInfoRequest,
@@ -152,12 +221,41 @@ def get_word_info(
     Instant dictionary lookup for words clicked in transcripts.
     """
     word = payload.word.strip().lower()
-    # Clean punctuation
     clean_w = re.sub(r'[^a-zA-Z]', '', word)
 
-    # Translate word
+    # 1. Check built-in core dictionary
+    if clean_w in CORE_DICTIONARY:
+        entry = CORE_DICTIONARY[clean_w]
+        ctx = payload.context or f"This is an example with {clean_w}."
+        return WordInfoResponse(
+            word=clean_w,
+            translation=entry["translation"],
+            part_of_speech=entry["pos"],
+            definition=f"Em português: '{entry['translation']}'.",
+            example=ctx
+        )
+
+    # 2. Translate word with robust multi-engine
     tr = translate_text(TranslateRequest(text=clean_w), current_user=current_user)
-    portuguese = tr.translation if tr.translation.lower() != clean_w.lower() else "palavra em inglês"
+    portuguese = tr.translation if tr.translation.lower() != clean_w.lower() else ""
+
+    # 3. If translation returned same word, try direct MyMemory translation
+    if not portuguese:
+        try:
+            res = requests.get(
+                "https://api.mymemory.translated.net/get",
+                params={"q": clean_w, "langpair": "en|pt-BR"},
+                timeout=5
+            )
+            if res.status_code == 200:
+                t = res.json().get("responseData", {}).get("translatedText")
+                if t and t.lower() != clean_w.lower():
+                    portuguese = t
+        except Exception:
+            pass
+
+    if not portuguese:
+        portuguese = clean_w
 
     pos = "termo"
     if clean_w.endswith("ly"):
@@ -166,16 +264,16 @@ def get_word_info(
         pos = "verbo"
     elif clean_w.endswith("tion") or clean_w.endswith("ment") or clean_w.endswith("ness"):
         pos = "substantivo"
-    elif clean_w.endswith("ful") or clean_w.endswith("able") or clean_w.endswith("ive"):
+    elif clean_w.endswith("ful") or clean_w.endswith("able") or clean_w.endswith("ive") or clean_w.endswith("ous"):
         pos = "adjetivo"
 
-    ctx = payload.context or f"This is an example with {clean_w}."
+    ctx = payload.context or f"Example with {clean_w}."
 
     return WordInfoResponse(
         word=clean_w,
         translation=portuguese,
         part_of_speech=pos,
-        definition=f"Em português: '{portuguese}'. Usado frequentemente na conversação diária.",
+        definition=f"Significa '{portuguese}' em português.",
         example=ctx
     )
 
