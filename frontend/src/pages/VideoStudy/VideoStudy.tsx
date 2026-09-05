@@ -134,6 +134,7 @@ export const VideoStudy: React.FC = () => {
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translatingIds, setTranslatingIds] = useState<Record<string, boolean>>({});
   const [savedSegmentIds, setSavedSegmentIds] = useState<Set<string>>(new Set());
+  const [savedPhrasesList, setSavedPhrasesList] = useState<any[]>([]);
   const [savingSegmentIds, setSavingSegmentIds] = useState<Record<string, boolean>>({});
 
   // Word Click Lookup Modal
@@ -198,10 +199,12 @@ export const VideoStudy: React.FC = () => {
 
         if (isMounted) {
           setVideo(videoData);
-          const savedIds = new Set(
-            savedPhrases
-              .filter((p) => p.video_id === id && p.transcript_segment_id)
-              .map((p) => p.transcript_segment_id as string)
+          const videoPhrases = savedPhrases.filter((p: any) => p.video_id === id);
+          setSavedPhrasesList(videoPhrases);
+          const savedIds = new Set<string>(
+            videoPhrases
+              .filter((p: any) => p.transcript_segment_id)
+              .map((p: any) => p.transcript_segment_id as string)
           );
           setSavedSegmentIds(savedIds);
         }
@@ -552,40 +555,65 @@ export const VideoStudy: React.FC = () => {
     }
   };
 
-  // Save Phrase Action - Automatically gets Portuguese translation!
+  // Save Phrase Action - Saves exact fragment text and supports toggle unsave!
   const handleSavePhrase = async (seg: TranscriptSegment, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!video) return;
 
-    const baseSegmentId = seg.id.includes('_p') ? seg.id.split('_p')[0] : seg.id;
-    if (savedSegmentIds.has(seg.id) || savedSegmentIds.has(baseSegmentId)) return;
+    const cleanSegText = seg.text.trim().toLowerCase();
+    const existingPhrase = savedPhrasesList.find(
+      (p) => p.text.trim().toLowerCase() === cleanSegText
+    );
 
+    // If already saved, clicking star toggles off (deletes)
+    if (existingPhrase) {
+      try {
+        setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: true }));
+        await phraseService.deletePhrase(existingPhrase.id);
+        setSavedPhrasesList((prev) => prev.filter((p) => p.id !== existingPhrase.id));
+        setSavedSegmentIds((prev) => {
+          const next = new Set(prev);
+          next.delete(seg.id);
+          return next;
+        });
+      } catch (err: any) {
+        alert(err.message || 'Falha ao remover frase salva.');
+      } finally {
+        setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: false }));
+      }
+      return;
+    }
+
+    // Save this exact short fragment
     try {
       setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: true }));
 
       let translationToSave = translations[seg.id];
       if (!translationToSave) {
         try {
-          const res = await aiService.translate(seg.text);
-          if (res.translation && res.translation.toLowerCase() !== seg.text.toLowerCase()) {
+          const res = await aiService.translate(seg.text.trim());
+          if (res.translation && res.translation.toLowerCase() !== seg.text.trim().toLowerCase()) {
             translationToSave = res.translation;
             setTranslations((prev) => ({ ...prev, [seg.id]: res.translation }));
           }
         } catch (e) {}
       }
 
-      await phraseService.savePhrase({
+      const baseSegmentId = seg.id.includes('_p') ? seg.id.split('_p')[0] : seg.id;
+
+      const created = await phraseService.savePhrase({
         video_id: video.id,
         transcript_segment_id: baseSegmentId,
-        text: seg.text,
+        text: seg.text.trim(),
         translation: translationToSave || null,
-        context_sentence: seg.text,
+        context_sentence: seg.text.trim(),
         timestamp: seg.start_time,
         phrase_type: 'SENTENCE',
         difficulty: 'NORMAL',
       });
 
-      setSavedSegmentIds((prev) => new Set([...prev, seg.id, baseSegmentId]));
+      setSavedPhrasesList((prev) => [created, ...prev]);
+      setSavedSegmentIds((prev) => new Set([...prev, seg.id]));
     } catch (err: any) {
       alert(err.message || 'Falha ao salvar frase.');
     } finally {
@@ -976,73 +1004,77 @@ export const VideoStudy: React.FC = () => {
       <div className="transcript-column">
         {/* Transcript Header & Search */}
         <div className="transcript-header">
-          <div className="flex-between">
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Sparkles size={15} color="var(--primary)" />
+          {/* Row 1: Title & Total counter */}
+          <div className="transcript-title-row">
+            <span style={{ fontSize: '0.92rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Sparkles size={16} color="var(--primary)" />
               Transcrição Interativa
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {/* Auto-Scroll Toggle */}
-              <button
-                onClick={() => setAutoScroll(!autoScroll)}
-                className={`control-btn ${autoScroll ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Rolar automaticamente para manter a frase falada centralizada"
-              >
-                Auto-scroll {autoScroll ? 'ON' : 'OFF'}
-              </button>
-
-              {/* Auto-Pause Mode Toggle */}
-              <button
-                onClick={() => setAutoPauseMode(!autoPauseMode)}
-                className={`control-btn ${autoPauseMode ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Pausar automaticamente ao fim de cada frase para você repetir"
-              >
-                Auto-Pausa {autoPauseMode ? 'ON' : 'OFF'}
-              </button>
-
-              {/* Listening Blur Toggle */}
-              <button
-                onClick={() => setListeningBlur(!listeningBlur)}
-                className={`control-btn ${listeningBlur ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Desfocar legendas para treinar o ouvido primeiro"
-              >
-                {listeningBlur ? <EyeOff size={12} style={{ marginRight: '3px' }} /> : <Eye size={12} style={{ marginRight: '3px' }} />}
-                Ouvido Aguçado
-              </button>
-
-              {/* Short Sentences Mode Toggle */}
-              <button
-                onClick={() => setShortSentencesMode(!shortSentencesMode)}
-                className={`control-btn ${shortSentencesMode ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Dividir frases longas em trechos curtos para facilitar o estudo"
-              >
-                <Scissors size={12} style={{ marginRight: '3px' }} />
-                Frases Curtas
-              </button>
-
-              {/* Live Auto-Translate Toggle */}
-              <button
-                onClick={() => setAutoTranslate(!autoTranslate)}
-                className={`control-btn ${autoTranslate ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Traduzir legendas automaticamente ao vivo"
-              >
-                <Languages size={12} style={{ marginRight: '3px' }} />
-                Auto-traduzir
-              </button>
-            </div>
+            <span className="transcript-badge-counter">
+              {displayedSegments.length} {shortSentencesMode ? 'frases curtas' : 'frases'}
+            </span>
           </div>
 
+          {/* Row 2: Elegant Horizontal Tool Ribbon */}
+          <div className="transcript-toolbar-row">
+            {/* Auto-Scroll Toggle */}
+            <button
+              onClick={() => setAutoScroll(!autoScroll)}
+              className={`tool-pill ${autoScroll ? 'active' : ''}`}
+              title="Rolar automaticamente para manter a frase falada centralizada"
+            >
+              <span className="tool-pill-dot" />
+              <span>Auto-scroll</span>
+            </button>
+
+            {/* Auto-Pause Mode Toggle */}
+            <button
+              onClick={() => setAutoPauseMode(!autoPauseMode)}
+              className={`tool-pill ${autoPauseMode ? 'active' : ''}`}
+              title="Pausar automaticamente ao fim de cada frase para você repetir em voz alta"
+            >
+              <Pause size={12} />
+              <span>Auto-Pausa</span>
+            </button>
+
+            {/* Listening Blur Toggle */}
+            <button
+              onClick={() => setListeningBlur(!listeningBlur)}
+              className={`tool-pill ${listeningBlur ? 'active' : ''}`}
+              title="Desfocar legendas para treinar o ouvido primeiro"
+            >
+              {listeningBlur ? <EyeOff size={12} /> : <Eye size={12} />}
+              <span>Ouvido</span>
+            </button>
+
+            {/* Short Sentences Mode Toggle */}
+            <button
+              onClick={() => setShortSentencesMode(!shortSentencesMode)}
+              className={`tool-pill ${shortSentencesMode ? 'active' : ''}`}
+              title="Dividir frases longas em trechos curtos para facilitar o estudo"
+            >
+              <Scissors size={12} />
+              <span>Frases Curtas</span>
+            </button>
+
+            {/* Live Auto-Translate Toggle */}
+            <button
+              onClick={() => setAutoTranslate(!autoTranslate)}
+              className={`tool-pill ${autoTranslate ? 'active' : ''}`}
+              title="Traduzir legendas automaticamente ao vivo"
+            >
+              <Languages size={12} />
+              <span>Traduzir</span>
+            </button>
+          </div>
+
+          {/* Row 3: Search Box */}
           <div className="transcript-search-box">
             <Search size={14} color="var(--text-muted)" />
             <input
               type="text"
               className="transcript-search-input"
-              placeholder="Buscar ou clique em qualquer palavra na frase..."
+              placeholder="Buscar frase ou clique em qualquer palavra..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -1066,8 +1098,10 @@ export const VideoStudy: React.FC = () => {
           ) : (
             filteredSegments.map((seg) => {
               const isActive = seg.id === activeSegmentId;
-              const baseId = seg.id.includes('_p') ? seg.id.split('_p')[0] : seg.id;
-              const isSaved = savedSegmentIds.has(seg.id) || savedSegmentIds.has(baseId);
+              const cleanText = seg.text.trim().toLowerCase();
+              const isSaved =
+                savedSegmentIds.has(seg.id) ||
+                savedPhrasesList.some((p) => p.text.trim().toLowerCase() === cleanText);
               const isSaving = !!savingSegmentIds[seg.id];
               const isTranslating = !!translatingIds[seg.id];
               const translation = translations[seg.id];
