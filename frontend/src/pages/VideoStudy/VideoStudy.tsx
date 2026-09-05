@@ -41,6 +41,8 @@ export const VideoStudy: React.FC = () => {
 
   // Player state
   const playerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -109,9 +111,7 @@ export const VideoStudy: React.FC = () => {
 
     const initPlayer = () => {
       if (destroyed || !window.YT || !window.YT.Player) return;
-
-      const playerTarget = document.getElementById('yt-study-player');
-      if (!playerTarget) return;
+      if (!containerRef.current) return;
 
       if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         try {
@@ -121,32 +121,47 @@ export const VideoStudy: React.FC = () => {
         }
       }
 
-      playerRef.current = new window.YT.Player('yt-study-player', {
-        videoId: video.youtube_id,
-        playerVars: {
-          autoplay: 0,
-          controls: 1,
-          modestbranding: 1,
-          rel: 0,
-          playsinline: 1,
-          enablejsapi: 1,
-        },
-        events: {
-          onReady: (event: any) => {
-            if (destroyed) return;
-            setPlaybackRate(event.target.getPlaybackRate() || 1);
+      // Recreate fresh mount target to avoid orphaned iframes
+      containerRef.current.innerHTML = '<div id="yt-study-player"></div>';
+
+      try {
+        playerRef.current = new window.YT.Player('yt-study-player', {
+          videoId: video.youtube_id,
+          host: 'https://www.youtube.com',
+          playerVars: {
+            autoplay: 0,
+            controls: 1,
+            modestbranding: 1,
+            rel: 0,
+            playsinline: 1,
+            enablejsapi: 1,
+            origin: window.location.origin,
+            widget_referrer: window.location.origin,
           },
-          onStateChange: (event: any) => {
-            if (destroyed) return;
-            // YT.PlayerState.PLAYING = 1, PAUSED = 2, ENDED = 0
-            if (event.data === 1) {
-              setIsPlaying(true);
-            } else {
-              setIsPlaying(false);
-            }
+          events: {
+            onReady: (event: any) => {
+              if (destroyed) return;
+              setIsPlayerReady(true);
+              try {
+                setPlaybackRate(event.target.getPlaybackRate() || 1);
+              } catch (e) {
+                // ignore
+              }
+            },
+            onStateChange: (event: any) => {
+              if (destroyed) return;
+              // YT.PlayerState.PLAYING = 1, PAUSED = 2, ENDED = 0
+              if (event.data === 1) {
+                setIsPlaying(true);
+              } else {
+                setIsPlaying(false);
+              }
+            },
           },
-        },
-      });
+        });
+      } catch (err) {
+        console.warn('Error creating YT.Player:', err);
+      }
     };
 
     if (!window.YT || !window.YT.Player) {
@@ -157,7 +172,13 @@ export const VideoStudy: React.FC = () => {
         const firstScriptTag = document.getElementsByTagName('script')[0];
         firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
       }
+      const prevCallback = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
+        if (typeof prevCallback === 'function') {
+          try {
+            prevCallback();
+          } catch (e) {}
+        }
         initPlayer();
       };
     } else {
@@ -395,7 +416,7 @@ export const VideoStudy: React.FC = () => {
         </div>
 
         {/* Video Player Box */}
-        <div className="video-player-wrapper">
+        <div className="video-player-wrapper" ref={containerRef}>
           <div id="yt-study-player" />
         </div>
 
