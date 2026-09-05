@@ -12,6 +12,14 @@ export interface CreatePhrasePayload {
   difficulty?: string;
 }
 
+export interface UpdatePhrasePayload {
+  text?: string;
+  translation?: string | null;
+  context_sentence?: string | null;
+  difficulty?: string;
+  status?: string;
+}
+
 export const phraseService = {
   async getPhrases(status?: string): Promise<SavedPhrase[]> {
     const query = status ? `?status=${status}` : '';
@@ -25,9 +33,17 @@ export const phraseService = {
     });
   },
 
+  async updatePhrase(id: string, data: UpdatePhrasePayload): Promise<SavedPhrase> {
+    return request<SavedPhrase>(`/phrases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   async deletePhrase(id: string): Promise<void> {
     return request<void>(`/phrases/${id}`, {
       method: 'DELETE',
     });
   },
 };
+

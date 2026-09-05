@@ -15,7 +15,9 @@ class SavedPhraseCreate(BaseModel):
 
 
 class SavedPhraseUpdate(BaseModel):
+    text: Optional[str] = None
     translation: Optional[str] = None
+    context_sentence: Optional[str] = None
     difficulty: Optional[str] = None
     status: Optional[str] = None
 

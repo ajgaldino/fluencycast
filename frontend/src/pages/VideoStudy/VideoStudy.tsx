@@ -16,7 +16,8 @@ import {
   Volume2,
   Info,
   X,
-  ExternalLink
+  ExternalLink,
+  Edit3
 } from 'lucide-react';
 import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
@@ -48,6 +49,7 @@ export const VideoStudy: React.FC = () => {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [autoTranslate, setAutoTranslate] = useState(false);
 
   // Synchronized Transcript State
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
@@ -56,6 +58,13 @@ export const VideoStudy: React.FC = () => {
   const [translatingIds, setTranslatingIds] = useState<Record<string, boolean>>({});
   const [savedSegmentIds, setSavedSegmentIds] = useState<Set<string>>(new Set());
   const [savingSegmentIds, setSavingSegmentIds] = useState<Record<string, boolean>>({});
+
+  // Segment Edit Modal
+  const [editingSeg, setEditingSeg] = useState<TranscriptSegment | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editTranslation, setEditTranslation] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [aiTranslatingEdit, setAiTranslatingEdit] = useState(false);
 
   // AI Explain Modal
   const [explainingSegment, setExplainingSegment] = useState<TranscriptSegment | null>(null);

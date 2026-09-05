@@ -74,6 +74,40 @@ def get_saved_phrase(
     return phrase
 
 
+@router.put("/{id}", response_model=SavedPhraseResponse)
+def update_saved_phrase(
+    id: str,
+    phrase_in: SavedPhraseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Update a saved phrase (text, translation, context, difficulty, status).
+    """
+    phrase = (
+        db.query(SavedPhrase)
+        .filter(SavedPhrase.id == id, SavedPhrase.user_id == current_user.id)
+        .first()
+    )
+    if not phrase:
+        raise HTTPException(status_code=404, detail="Phrase not found")
+
+    if phrase_in.text is not None:
+        phrase.text = phrase_in.text
+    if phrase_in.translation is not None:
+        phrase.translation = phrase_in.translation
+    if phrase_in.context_sentence is not None:
+        phrase.context_sentence = phrase_in.context_sentence
+    if phrase_in.difficulty is not None:
+        phrase.difficulty = phrase_in.difficulty
+    if phrase_in.status is not None:
+        phrase.status = phrase_in.status
+
+    db.commit()
+    db.refresh(phrase)
+    return phrase
+
+
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_saved_phrase(
     id: str,
