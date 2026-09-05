@@ -18,11 +18,19 @@ import {
   X,
   ExternalLink,
   Edit3,
-  Scissors
+  Scissors,
+  Eye,
+  EyeOff,
+  Mic,
+  MicOff,
+  MessageSquare,
+  Puzzle,
+  Send,
+  HelpCircle
 } from 'lucide-react';
 import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
-import { aiService, ExplainResponse } from '../../services/ai';
+import { aiService, ExplainResponse, WordInfoResponse } from '../../services/ai';
 import { Video, TranscriptSegment } from '../../types/video';
 import './VideoStudy.css';
 
@@ -110,9 +118,15 @@ export const VideoStudy: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
+
+  // Learning Modes
   const [autoScroll, setAutoScroll] = useState(true);
   const [autoTranslate, setAutoTranslate] = useState(false);
   const [shortSentencesMode, setShortSentencesMode] = useState(true);
+  const [listeningBlur, setListeningBlur] = useState(false);
+  const [autoPauseMode, setAutoPauseMode] = useState(false);
+  const [isPausedForShadowing, setIsPausedForShadowing] = useState(false);
+  const lastPausedSegRef = useRef<string | null>(null);
 
   // Synchronized Transcript State
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
@@ -121,6 +135,36 @@ export const VideoStudy: React.FC = () => {
   const [translatingIds, setTranslatingIds] = useState<Record<string, boolean>>({});
   const [savedSegmentIds, setSavedSegmentIds] = useState<Set<string>>(new Set());
   const [savingSegmentIds, setSavingSegmentIds] = useState<Record<string, boolean>>({});
+
+  // Word Click Lookup Modal
+  const [wordModalData, setWordModalData] = useState<WordInfoResponse | null>(null);
+  const [loadingWord, setLoadingWord] = useState(false);
+  const [savingWord, setSavingWord] = useState(false);
+  const [wordSavedSuccess, setWordSavedSuccess] = useState(false);
+
+  // Voice Recording
+  const [recordingSegId, setRecordingSegId] = useState<string | null>(null);
+  const [userAudioUrls, setUserAudioUrls] = useState<Record<string, string>>({});
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Cloze / Dictation Quiz Modal
+  const [quizSeg, setQuizSeg] = useState<TranscriptSegment | null>(null);
+  const [quizBlankWord, setQuizBlankWord] = useState('');
+  const [quizOptions, setQuizOptions] = useState<string[]>([]);
+  const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
+  const [quizResult, setQuizResult] = useState<'correct' | 'wrong' | null>(null);
+
+  // AI Tutor Chat
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'tutor'; text: string }>>([
+    {
+      role: 'tutor',
+      text: 'Olá! Sou seu Tutor IA. Pode me fazer qualquer pergunta sobre as frases, expressões, gírias ou pronúncia deste vídeo!'
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [sendingChat, setSendingChat] = useState(false);
 
   // Segment Edit Modal State
   const [editingSeg, setEditingSeg] = useState<TranscriptSegment | null>(null);
@@ -230,6 +274,7 @@ export const VideoStudy: React.FC = () => {
               if (destroyed) return;
               if (event.data === 1) {
                 setIsPlaying(true);
+                setIsPausedForShadowing(false);
               } else {
                 setIsPlaying(false);
               }
@@ -268,7 +313,7 @@ export const VideoStudy: React.FC = () => {
     };
   }, [video?.youtube_id]);
 
-  // 3. Playback Synchronization Polling
+  // 3. Playback Synchronization Polling & Auto-Pause
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
 
@@ -290,6 +335,19 @@ export const VideoStudy: React.FC = () => {
             if (seg) {
               setActiveSegmentId(seg.id);
 
+              // Auto-Pause (Shadowing): Pause when reaching segment end
+              if (
+                autoPauseMode &&
+                time >= seg.end_time - 0.3 &&
+                lastPausedSegRef.current !== seg.id
+              ) {
+                lastPausedSegRef.current = seg.id;
+                playerRef.current.pauseVideo();
+                setIsPausedForShadowing(true);
+                return;
+              }
+
+              // Loop mode: repeat active sentence
               if (isLoopingSegment && time >= seg.end_time - 0.2) {
                 playerRef.current.seekTo(seg.start_time, true);
               }
@@ -304,7 +362,7 @@ export const VideoStudy: React.FC = () => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [displayedSegments, isLoopingSegment]);
+  }, [displayedSegments, isLoopingSegment, autoPauseMode]);
 
   // Auto-translate active segment if live autoTranslate is enabled
   useEffect(() => {
@@ -346,8 +404,15 @@ export const VideoStudy: React.FC = () => {
         playerRef.current.pauseVideo();
       } else {
         playerRef.current.playVideo();
+        setIsPausedForShadowing(false);
       }
     } catch (e) {}
+  };
+
+  const handleResumeFromAutoPause = () => {
+    if (!playerRef.current) return;
+    setIsPausedForShadowing(false);
+    playerRef.current.playVideo();
   };
 
   const handleSeekDelta = (deltaSeconds: number) => {
@@ -361,6 +426,8 @@ export const VideoStudy: React.FC = () => {
   const handleSeekToSegment = (seg: TranscriptSegment) => {
     if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
     try {
+      lastPausedSegRef.current = null;
+      setIsPausedForShadowing(false);
       playerRef.current.seekTo(seg.start_time, true);
       playerRef.current.playVideo();
     } catch (e) {}
@@ -370,6 +437,8 @@ export const VideoStudy: React.FC = () => {
     if (!displayedSegments.length || !playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
     const activeSeg = displayedSegments.find((s) => s.id === activeSegmentId);
     try {
+      lastPausedSegRef.current = null;
+      setIsPausedForShadowing(false);
       if (activeSeg) {
         playerRef.current.seekTo(activeSeg.start_time, true);
         playerRef.current.playVideo();
@@ -387,6 +456,66 @@ export const VideoStudy: React.FC = () => {
     } catch (e) {}
   };
 
+  const handleSpeakWord = (word: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(word);
+      utt.lang = 'en-US';
+      utt.rate = 0.88;
+      window.speechSynthesis.speak(utt);
+    }
+  };
+
+  // Click on a single word for Instant Dictionary Lookup
+  const handleWordClick = async (cleanWord: string, contextSentence: string) => {
+    setWordSavedSuccess(false);
+    setLoadingWord(true);
+    setWordModalData({
+      word: cleanWord,
+      translation: 'Buscando...',
+      part_of_speech: 'palavra',
+      definition: 'Carregando significado...',
+      example: contextSentence
+    });
+
+    try {
+      const info = await aiService.getWordInfo(cleanWord, contextSentence);
+      setWordModalData(info);
+    } catch (e) {
+      setWordModalData({
+        word: cleanWord,
+        translation: cleanWord,
+        part_of_speech: 'palavra',
+        definition: `Palavra em inglês no contexto: "${contextSentence}"`,
+        example: contextSentence
+      });
+    } finally {
+      setLoadingWord(false);
+    }
+  };
+
+  // Save Single Word into Word Deck
+  const handleSaveWordToDeck = async () => {
+    if (!wordModalData || !video) return;
+    try {
+      setSavingWord(true);
+      await phraseService.savePhrase({
+        video_id: video.id,
+        text: wordModalData.word,
+        translation: wordModalData.translation,
+        context_sentence: wordModalData.example,
+        timestamp: currentTime,
+        phrase_type: 'WORD',
+        difficulty: 'NORMAL'
+      });
+      setWordSavedSuccess(true);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao salvar palavra no deck.');
+    } finally {
+      setSavingWord(false);
+    }
+  };
+
   // Save Phrase Action - Automatically gets Portuguese translation!
   const handleSavePhrase = async (seg: TranscriptSegment, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -398,7 +527,6 @@ export const VideoStudy: React.FC = () => {
     try {
       setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: true }));
 
-      // Automatically translate if not already cached
       let translationToSave = translations[seg.id];
       if (!translationToSave) {
         try {
@@ -407,9 +535,7 @@ export const VideoStudy: React.FC = () => {
             translationToSave = res.translation;
             setTranslations((prev) => ({ ...prev, [seg.id]: res.translation }));
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       }
 
       await phraseService.savePhrase({
@@ -451,6 +577,111 @@ export const VideoStudy: React.FC = () => {
       alert('Não foi possível traduzir a frase neste momento.');
     } finally {
       setTranslatingIds((prev) => ({ ...prev, [seg.id]: false }));
+    }
+  };
+
+  // Voice Recording Toggle for Segment
+  const handleToggleRecord = async (seg: TranscriptSegment, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (recordingSegId === seg.id) {
+      // Stop recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      setRecordingSegId(null);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        setUserAudioUrls((prev) => ({ ...prev, [seg.id]: audioUrl }));
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start();
+      setRecordingSegId(seg.id);
+    } catch (err) {
+      alert('Permissão de microfone não concedida ou dispositivo não disponível.');
+    }
+  };
+
+  const handlePlayUserVoice = (segId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const url = userAudioUrls[segId];
+    if (url) {
+      const audio = new Audio(url);
+      audio.play();
+    }
+  };
+
+  // Open Cloze / Dictation Quiz for Segment
+  const handleOpenQuiz = (seg: TranscriptSegment, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const words = seg.text.split(/\s+/).map((w) => w.replace(/[^a-zA-Z]/g, '')).filter((w) => w.length >= 4);
+    if (words.length === 0) return;
+
+    // Pick a candidate word to blank out
+    const target = words[Math.floor(Math.random() * words.length)];
+    // Generate 3 distractors
+    const pool = ['difficult', 'energy', 'people', 'always', 'listen', 'important', 'friend', 'together', 'problem', 'conversation'];
+    const distractors = pool.filter((p) => p.toLowerCase() !== target.toLowerCase()).slice(0, 3);
+    const shuffled = [target, ...distractors].sort(() => Math.random() - 0.5);
+
+    setQuizSeg(seg);
+    setQuizBlankWord(target);
+    setQuizOptions(shuffled);
+    setQuizAnswer(null);
+    setQuizResult(null);
+
+    // Play the audio segment to help with dictation
+    handleSeekToSegment(seg);
+  };
+
+  const handleSelectQuizOption = (option: string) => {
+    setQuizAnswer(option);
+    if (option.toLowerCase() === quizBlankWord.toLowerCase()) {
+      setQuizResult('correct');
+    } else {
+      setQuizResult('wrong');
+    }
+  };
+
+  // AI Tutor Chat handler
+  const handleSendChatMessage = async () => {
+    if (!chatInput.trim() || sendingChat) return;
+
+    const userText = chatInput.trim();
+    setChatMessages((prev) => [...prev, { role: 'user', text: userText }]);
+    setChatInput('');
+    setSendingChat(true);
+
+    const activeSeg = displayedSegments.find((s) => s.id === activeSegmentId);
+    const contextText = activeSeg ? activeSeg.text : (video?.title || '');
+
+    try {
+      const res = await aiService.chatWithTutor(userText, contextText);
+      setChatMessages((prev) => [...prev, { role: 'tutor', text: res.reply }]);
+    } catch (err) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'tutor', text: 'Essa estrutura é super comum no inglês diário! Pratique repetindo o trecho em voz alta.' }
+      ]);
+    } finally {
+      setSendingChat(false);
     }
   };
 
@@ -592,8 +823,17 @@ export const VideoStudy: React.FC = () => {
             <ArrowLeft size={15} />
             <span>Voltar aos Vídeos</span>
           </button>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            {video.category === 'music' ? '🎵 Estudo de Canção' : '🎬 Estudo com Vídeo'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {/* Open AI Tutor Chat Button */}
+            <button
+              onClick={() => setChatOpen(true)}
+              className="btn btn-secondary"
+              style={{ padding: '0.4rem 0.75rem', fontSize: '0.82rem', borderColor: 'var(--accent-purple)', color: 'var(--accent-purple)' }}
+              title="Tirar dúvidas com o Tutor IA sobre o vídeo"
+            >
+              <MessageSquare size={14} />
+              <span>Tutor IA</span>
+            </button>
           </div>
         </div>
 
@@ -601,6 +841,23 @@ export const VideoStudy: React.FC = () => {
         <div className="video-player-wrapper" ref={containerRef}>
           <div id="yt-study-player" />
         </div>
+
+        {/* Auto-Pause (Shadowing) Banner */}
+        {isPausedForShadowing && (
+          <div className="auto-pause-banner">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.86rem', color: '#fff', fontWeight: 600 }}>
+              <span>⏸️ Frase pausada para você repetir em voz alta!</span>
+            </div>
+            <button
+              onClick={handleResumeFromAutoPause}
+              className="btn btn-primary"
+              style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }}
+            >
+              <Play size={14} />
+              <span>Continuar</span>
+            </button>
+          </div>
+        )}
 
         {/* Study Playback Toolbar */}
         <div className="study-controls-bar">
@@ -686,9 +943,30 @@ export const VideoStudy: React.FC = () => {
           <div className="flex-between">
             <span style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <Sparkles size={15} color="var(--primary)" />
-              Transcrição Sincronizada
+              Transcrição Interativa
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {/* Auto-Pause Mode Toggle */}
+              <button
+                onClick={() => setAutoPauseMode(!autoPauseMode)}
+                className={`control-btn ${autoPauseMode ? 'active' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                title="Pausar automaticamente ao fim de cada frase para você repetir"
+              >
+                Auto-Pausa {autoPauseMode ? 'ON' : 'OFF'}
+              </button>
+
+              {/* Listening Blur Toggle */}
+              <button
+                onClick={() => setListeningBlur(!listeningBlur)}
+                className={`control-btn ${listeningBlur ? 'active' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                title="Desfocar legendas para treinar o ouvido primeiro"
+              >
+                {listeningBlur ? <EyeOff size={12} style={{ marginRight: '3px' }} /> : <Eye size={12} style={{ marginRight: '3px' }} />}
+                Ouvido Aguçado
+              </button>
+
               {/* Short Sentences Mode Toggle */}
               <button
                 onClick={() => setShortSentencesMode(!shortSentencesMode)}
@@ -697,7 +975,7 @@ export const VideoStudy: React.FC = () => {
                 title="Dividir frases longas em trechos curtos para facilitar o estudo"
               >
                 <Scissors size={12} style={{ marginRight: '3px' }} />
-                Frases Curtas {shortSentencesMode ? 'ON' : 'OFF'}
+                Frases Curtas
               </button>
 
               {/* Live Auto-Translate Toggle */}
@@ -708,17 +986,7 @@ export const VideoStudy: React.FC = () => {
                 title="Traduzir legendas automaticamente ao vivo"
               >
                 <Languages size={12} style={{ marginRight: '3px' }} />
-                Auto-traduzir {autoTranslate ? 'ON' : 'OFF'}
-              </button>
-
-              {/* Auto Scroll Toggle */}
-              <button
-                onClick={() => setAutoScroll(!autoScroll)}
-                className={`control-btn ${autoScroll ? 'active' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
-                title="Rolar lista automaticamente acompanhando a fala"
-              >
-                Auto-scroll {autoScroll ? 'ON' : 'OFF'}
+                Auto-traduzir
               </button>
             </div>
           </div>
@@ -728,7 +996,7 @@ export const VideoStudy: React.FC = () => {
             <input
               type="text"
               className="transcript-search-input"
-              placeholder="Buscar palavras ou expressões na transcrição..."
+              placeholder="Buscar ou clique em qualquer palavra na frase..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -757,6 +1025,8 @@ export const VideoStudy: React.FC = () => {
               const isSaving = !!savingSegmentIds[seg.id];
               const isTranslating = !!translatingIds[seg.id];
               const translation = translations[seg.id];
+              const isRecording = recordingSegId === seg.id;
+              const userVoiceUrl = userAudioUrls[seg.id];
 
               return (
                 <div
@@ -772,16 +1042,47 @@ export const VideoStudy: React.FC = () => {
                     </span>
 
                     <div className="segment-actions">
-                      {/* Ouvir trecho */}
+                      {/* Ouvir trecho nativo */}
                       <button
                         className="action-btn"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSeekToSegment(seg);
                         }}
-                        title="Tocar este trecho"
+                        title="Tocar este trecho do vídeo"
                       >
                         <Volume2 size={15} />
+                      </button>
+
+                      {/* Gravar Minha Voz (Shadowing Practice) */}
+                      <button
+                        className="action-btn"
+                        onClick={(e) => handleToggleRecord(seg, e)}
+                        title={isRecording ? 'Parar gravação' : 'Gravar sua voz para comparar pronúncia'}
+                        style={{ color: isRecording ? 'var(--accent-rose)' : undefined }}
+                      >
+                        {isRecording ? <MicOff size={15} className="recording-badge" /> : <Mic size={15} />}
+                      </button>
+
+                      {/* Ouvir Minha Voz Gravada */}
+                      {userVoiceUrl && (
+                        <button
+                          className="action-btn"
+                          onClick={(e) => handlePlayUserVoice(seg.id, e)}
+                          title="Ouvir sua gravação"
+                          style={{ color: 'var(--accent-emerald)' }}
+                        >
+                          <Play size={14} />
+                        </button>
+                      )}
+
+                      {/* Ditado / Desafio Quiz */}
+                      <button
+                        className="action-btn"
+                        onClick={(e) => handleOpenQuiz(seg, e)}
+                        title="Desafio de Escuta / Ditado"
+                      >
+                        <Puzzle size={15} color="var(--accent-amber)" />
                       </button>
 
                       {/* Traduzir para Português */}
@@ -798,7 +1099,7 @@ export const VideoStudy: React.FC = () => {
                         )}
                       </button>
 
-                      {/* Editar texto ou tradução antes/depois de salvar */}
+                      {/* Editar texto ou tradução */}
                       <button
                         className="action-btn"
                         onClick={(e) => handleOpenEditModal(seg, e)}
@@ -834,8 +1135,25 @@ export const VideoStudy: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* English Sentence Text */}
-                  <div className="segment-text">{seg.text}</div>
+                  {/* English Sentence with Clickable Words & Blur Mode */}
+                  <div className={`segment-text ${listeningBlur ? 'blurred-text' : ''}`}>
+                    {seg.text.split(/\s+/).map((w, wIdx) => {
+                      const clean = w.replace(/[^a-zA-Z]/g, '');
+                      return (
+                        <span
+                          key={wIdx}
+                          className="word-token"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (clean) handleWordClick(clean, seg.text);
+                          }}
+                          title="Clique para ver o significado e salvar no vocabulário"
+                        >
+                          {w}{' '}
+                        </span>
+                      );
+                    })}
+                  </div>
 
                   {/* Inline Translation if active */}
                   {translation && (
@@ -849,6 +1167,260 @@ export const VideoStudy: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* WORD LOOKUP MODAL (When clicking any single word) */}
+      {wordModalData && (
+        <div className="ai-modal-overlay" onClick={() => setWordModalData(null)}>
+          <div className="ai-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+            <div className="flex-between" style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span className="badge badge-primary">DICIONÁRIO CONTEXTUAL</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{wordModalData.part_of_speech}</span>
+              </div>
+              <button
+                onClick={() => setWordModalData(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+              <h3 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff' }}>
+                {wordModalData.word}
+              </h3>
+              <button
+                onClick={() => handleSpeakWord(wordModalData.word)}
+                className="btn btn-secondary"
+                style={{ padding: '0.35rem 0.65rem' }}
+                title="Ouvir pronúncia"
+              >
+                <Volume2 size={16} color="var(--accent-cyan)" />
+              </button>
+            </div>
+
+            <div style={{
+              padding: '0.85rem',
+              background: 'rgba(6, 182, 212, 0.08)',
+              border: '1px solid rgba(6, 182, 212, 0.25)',
+              borderRadius: 'var(--radius-sm)',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>
+                TRADUÇÃO EM PORTUGUÊS:
+              </div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                {wordModalData.translation}
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--bg-glass)', padding: '0.65rem', borderRadius: 'var(--radius-sm)', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>
+                EXEMPLO NA FALA:
+              </div>
+              "{wordModalData.example}"
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setWordModalData(null)}
+                className="btn btn-secondary"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveWordToDeck}
+                className="btn btn-primary"
+                disabled={savingWord || wordSavedSuccess}
+              >
+                {savingWord ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : wordSavedSuccess ? (
+                  <Check size={15} color="var(--accent-emerald)" />
+                ) : (
+                  <Star size={15} />
+                )}
+                <span>{wordSavedSuccess ? 'Palavra Salva!' : 'Salvar no Deck de Palavras'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CLOZE / DICTATION QUIZ MODAL */}
+      {quizSeg && (
+        <div className="ai-modal-overlay" onClick={() => setQuizSeg(null)}>
+          <div className="ai-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <div className="flex-between" style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '1.05rem', color: 'var(--accent-amber)' }}>
+                <Puzzle size={18} />
+                <span>Desafio de Escuta (Preencha a Lacuna)</span>
+              </div>
+              <button
+                onClick={() => setQuizSeg(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              Ouça o trecho e escolha a palavra correta que completa a frase:
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
+              <button
+                onClick={() => handleSeekToSegment(quizSeg)}
+                className="btn btn-secondary"
+                style={{ padding: '0.5rem 1rem' }}
+              >
+                <Play size={16} color="var(--accent-cyan)" />
+                <span>Ouvir Trecho Novamente</span>
+              </button>
+            </div>
+
+            {/* Sentence with blank */}
+            <div style={{
+              fontSize: '1.2rem',
+              fontWeight: 600,
+              textAlign: 'center',
+              lineHeight: 1.6,
+              background: 'var(--bg-glass)',
+              padding: '1.25rem',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: '1.25rem'
+            }}>
+              {quizSeg.text.split(/\s+/).map((w, i) => {
+                const clean = w.replace(/[^a-zA-Z]/g, '');
+                if (clean.toLowerCase() === quizBlankWord.toLowerCase()) {
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        padding: '0.2rem 0.6rem',
+                        borderBottom: '3px solid var(--accent-amber)',
+                        color: quizAnswer ? (quizResult === 'correct' ? 'var(--accent-emerald)' : 'var(--accent-rose)') : 'var(--accent-amber)',
+                        fontWeight: 800
+                      }}
+                    >
+                      {quizAnswer || '_____'}
+                    </span>
+                  );
+                }
+                return <span key={i}> {w} </span>;
+              })}
+            </div>
+
+            {/* Word choices */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '1.25rem' }}>
+              {quizOptions.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSelectQuizOption(opt)}
+                  className={`word-tile-chip ${quizAnswer === opt ? 'selected' : ''}`}
+                  style={{ justifyContent: 'center' }}
+                  disabled={!!quizAnswer}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+
+            {/* Feedback */}
+            {quizResult && (
+              <div style={{
+                textAlign: 'center',
+                padding: '0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                background: quizResult === 'correct' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                color: quizResult === 'correct' ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                marginBottom: '1rem'
+              }}>
+                {quizResult === 'correct' ? '🎉 Resposta Correta! Excelente audição.' : `❌ Quase! A palavra dita foi "${quizBlankWord}".`}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setQuizSeg(null)} className="btn btn-secondary">
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI TUTOR CHAT DRAWER */}
+      {chatOpen && (
+        <div className="ai-modal-overlay" onClick={() => setChatOpen(false)}>
+          <div className="ai-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px', height: '600px', display: 'flex', flexDirection: 'column' }}>
+            <div className="flex-between" style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--accent-purple)' }}>
+                <MessageSquare size={18} />
+                <span>Tutor IA Contextual</span>
+              </div>
+              <button
+                onClick={() => setChatOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Message history */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.25rem', marginBottom: '1rem' }}>
+              {chatMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    background: msg.role === 'user' ? 'var(--primary)' : 'var(--bg-glass)',
+                    color: '#fff',
+                    padding: '0.65rem 0.95rem',
+                    borderRadius: 'var(--radius-md)',
+                    maxWidth: '85%',
+                    fontSize: '0.9rem',
+                    lineHeight: 1.5,
+                    border: msg.role === 'user' ? 'none' : '1px solid var(--border-subtle)'
+                  }}
+                >
+                  {msg.text}
+                </div>
+              ))}
+              {sendingChat && (
+                <div style={{ alignSelf: 'flex-start', color: 'var(--text-muted)', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Loader2 size={13} className="animate-spin" />
+                  <span>Tutor está respondendo...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Chat Input */}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Ex: Por que usaram essa palavra? Me dê exemplos..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendChatMessage()}
+                style={{ flex: 1, fontSize: '0.9rem' }}
+              />
+              <button
+                onClick={handleSendChatMessage}
+                className="btn btn-primary"
+                disabled={sendingChat || !chatInput.trim()}
+                style={{ padding: '0.6rem 1rem' }}
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SEGMENT EDIT MODAL */}
       {editingSeg && (

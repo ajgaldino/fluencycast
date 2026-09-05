@@ -15,8 +15,9 @@ export const reviewService = {
     return request<ReviewSummary>('/reviews/summary');
   },
 
-  async getTodayReviews(): Promise<SavedPhrase[]> {
-    return request<SavedPhrase[]>('/reviews/today');
+  async getTodayReviews(phraseType?: string): Promise<SavedPhrase[]> {
+    const query = phraseType ? `?phrase_type=${phraseType}` : '';
+    return request<SavedPhrase[]>(`/reviews/today${query}`);
   },
 
   async submitReview(phraseId: string, quality: number): Promise<SubmitReviewResponse> {

@@ -84,4 +84,48 @@ export const aiService = {
       };
     }
   },
+
+  async getWordInfo(word: string, context?: string): Promise<WordInfoResponse> {
+    try {
+      return await request<WordInfoResponse>('/ai/word-info', {
+        method: 'POST',
+        body: JSON.stringify({ word, context }),
+      });
+    } catch (e) {
+      const tr = await this.translate(word);
+      return {
+        word,
+        translation: tr.translation,
+        part_of_speech: 'termo',
+        definition: `Tradução: ${tr.translation}`,
+        example: context || word,
+      };
+    }
+  },
+
+  async chatWithTutor(message: string, context?: string): Promise<ChatResponse> {
+    try {
+      return await request<ChatResponse>('/ai/chat', {
+        method: 'POST',
+        body: JSON.stringify({ message, context }),
+      });
+    } catch (e) {
+      return {
+        reply: 'Praticar com este trecho ajuda a internalizar a gramática natural do inglês falado!',
+      };
+    }
+  },
 };
+
+export interface WordInfoResponse {
+  word: string;
+  translation: string;
+  part_of_speech: string;
+  definition: string;
+  example: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+}
+

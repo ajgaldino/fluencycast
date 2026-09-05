@@ -60,22 +60,30 @@ def get_review_summary(
 def get_today_reviews(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    limit: int = 30,
+    phrase_type: Optional[str] = None,
+    limit: int = 50,
 ) -> Any:
     """
     Get phrases due for review today according to spaced repetition schedule.
+    Supports filtering by phrase_type ("WORD" for vocabulary words or "SENTENCE" for full sentences).
     """
     now = datetime.now(timezone.utc)
-    phrases = (
-        db.query(SavedPhrase)
-        .filter(
-            SavedPhrase.user_id == current_user.id,
-            SavedPhrase.next_review_at <= now
-        )
-        .order_by(SavedPhrase.next_review_at.asc())
-        .limit(limit)
-        .all()
+    query = db.query(SavedPhrase).filter(
+        SavedPhrase.user_id == current_user.id,
+        SavedPhrase.next_review_at <= now
     )
+    if phrase_type:
+        query = query.filter(SavedPhrase.phrase_type == phrase_type.upper())
+
+    phrases = query.order_by(SavedPhrase.next_review_at.asc()).limit(limit).all()
+
+    # If no phrases due strictly at this hour, return all available phrases of that type for continuous practice
+    if not phrases:
+        fallback_query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
+        if phrase_type:
+            fallback_query = fallback_query.filter(SavedPhrase.phrase_type == phrase_type.upper())
+        phrases = fallback_query.order_by(SavedPhrase.created_at.desc()).limit(limit).all()
+
     return phrases
 
 

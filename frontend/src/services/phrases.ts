@@ -40,6 +40,13 @@ export const phraseService = {
     });
   },
 
+  async extractWords(videoId?: string): Promise<SavedPhrase[]> {
+    const query = videoId ? `?video_id=${videoId}` : '';
+    return request<SavedPhrase[]>(`/phrases/extract-words${query}`, {
+      method: 'POST',
+    });
+  },
+
   async deletePhrase(id: string): Promise<void> {
     return request<void>(`/phrases/${id}`, {
       method: 'DELETE',

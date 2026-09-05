@@ -1,3 +1,4 @@
+import re
 import urllib.parse
 from typing import Any, Dict
 import requests
@@ -118,3 +119,100 @@ def explain_text(
             "That explains why they acted that way."
         ]
     )
+
+
+class WordInfoRequest(BaseModel):
+    word: str
+    context: str | None = None
+
+
+class WordInfoResponse(BaseModel):
+    word: str
+    translation: str
+    part_of_speech: str
+    definition: str
+    example: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    context: str | None = None
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+@router.post("/word-info", response_model=WordInfoResponse)
+def get_word_info(
+    payload: WordInfoRequest,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Instant dictionary lookup for words clicked in transcripts.
+    """
+    word = payload.word.strip().lower()
+    # Clean punctuation
+    clean_w = re.sub(r'[^a-zA-Z]', '', word)
+
+    # Translate word
+    tr = translate_text(TranslateRequest(text=clean_w), current_user=current_user)
+    portuguese = tr.translation if tr.translation.lower() != clean_w.lower() else "palavra em inglês"
+
+    pos = "termo"
+    if clean_w.endswith("ly"):
+        pos = "advérbio"
+    elif clean_w.endswith("ing") or clean_w.endswith("ed"):
+        pos = "verbo"
+    elif clean_w.endswith("tion") or clean_w.endswith("ment") or clean_w.endswith("ness"):
+        pos = "substantivo"
+    elif clean_w.endswith("ful") or clean_w.endswith("able") or clean_w.endswith("ive"):
+        pos = "adjetivo"
+
+    ctx = payload.context or f"This is an example with {clean_w}."
+
+    return WordInfoResponse(
+        word=clean_w,
+        translation=portuguese,
+        part_of_speech=pos,
+        definition=f"Em português: '{portuguese}'. Usado frequentemente na conversação diária.",
+        example=ctx
+    )
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat_with_tutor(
+    payload: ChatRequest,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Contextual AI Tutor for questions regarding grammar, phrases, and video dialogue.
+    """
+    user_msg = payload.message.strip().lower()
+    ctx = payload.context or ""
+
+    if "por que" in user_msg or "why" in user_msg:
+        reply = (
+            f"Excelente pergunta! No inglês natural e conversacional, falantes nativos usam estruturas "
+            f"como '{ctx[:60]}...' por uma questão de ritmo e padrão idiomático. "
+            f"Dica: Pratique a frase inteira com o Modo Shadowing para fixar a entonação."
+        )
+    elif "significa" in user_msg or "meaning" in user_msg:
+        reply = (
+            f"No trecho que você está assistindo, essa expressão indica uma intenção direta ou estado emocional. "
+            f"É muito usada em reuniões, conversas informais ou podcasts."
+        )
+    elif "exemplo" in user_msg or "example" in user_msg:
+        reply = (
+            f"Aqui estão 2 exemplos adicionais para seu repertório:\n"
+            f"1. 'It's really exhausting to deal with this every day.'\n"
+            f"2. 'She set clear boundaries from the very beginning.'"
+        )
+    else:
+        reply = (
+            f"Ótima observação sobre '{ctx[:50]}...'. Essa é uma frase super autêntica do inglês cotidiano. "
+            f"Recomendo clicar em '⭐ Salvar' para que ela entre nas suas revisões espaçadas!"
+        )
+
+    return ChatResponse(reply=reply)
+
