@@ -33,6 +33,88 @@ class ExplainResponse(BaseModel):
     examples: list[str]
 
 
+CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
+    "let": {"translation": "deixar, permitir", "pos": "verbo"},
+    "about": {"translation": "sobre, a respeito de, quase", "pos": "preposição / advérbio"},
+    "something": {"translation": "algo, alguma coisa", "pos": "pronome"},
+    "everything": {"translation": "tudo, todas as coisas", "pos": "pronome"},
+    "nothing": {"translation": "nada", "pos": "pronome"},
+    "anything": {"translation": "qualquer coisa, nada", "pos": "pronome"},
+    "think": {"translation": "pensar, achar, acreditar", "pos": "verbo"},
+    "look": {"translation": "olhar, parecer, buscar", "pos": "verbo"},
+    "get": {"translation": "obter, conseguir, ficar, entender", "pos": "verbo"},
+    "take": {"translation": "levar, tomar, pegar", "pos": "verbo"},
+    "see": {"translation": "ver, enxergar, entender", "pos": "verbo"},
+    "know": {"translation": "saber, conhecer", "pos": "verbo"},
+    "make": {"translation": "fazer, criar, tornar", "pos": "verbo"},
+    "say": {"translation": "dizer, falar", "pos": "verbo"},
+    "tell": {"translation": "contar, dizer a alguém", "pos": "verbo"},
+    "feel": {"translation": "sentir, achar", "pos": "verbo"},
+    "want": {"translation": "querer, desejar", "pos": "verbo"},
+    "need": {"translation": "precisar, necessitar", "pos": "verbo"},
+    "mean": {"translation": "significar, pretender", "pos": "verbo"},
+    "keep": {"translation": "manter, continuar", "pos": "verbo"},
+    "help": {"translation": "ajudar, ajuda", "pos": "verbo"},
+    "talk": {"translation": "conversar, falar", "pos": "verbo"},
+    "listen": {"translation": "ouvir, escutar", "pos": "verbo"},
+    "handle": {"translation": "lidar com, aguentar, manusear", "pos": "verbo"},
+    "deal": {"translation": "lidar, tratar, acordo", "pos": "verbo"},
+    "face": {"translation": "encarar, enfrentar, rosto", "pos": "verbo / substantivo"},
+    "run": {"translation": "correr, fugir, executar", "pos": "verbo"},
+    "walk": {"translation": "andar, caminhar", "pos": "verbo"},
+    "live": {"translation": "viver, morar", "pos": "verbo"},
+    "stay": {"translation": "ficar, permanecer", "pos": "verbo"},
+    "leave": {"translation": "deixar, partir, sair", "pos": "verbo"},
+    "stop": {"translation": "parar, interromper", "pos": "verbo"},
+    "start": {"translation": "começar, iniciar", "pos": "verbo"},
+    "try": {"translation": "tentar, experimentar", "pos": "verbo"},
+    "ask": {"translation": "perguntar, pedir", "pos": "verbo"},
+    "answer": {"translation": "responder, resposta", "pos": "verbo / substantivo"},
+    "question": {"translation": "pergunta, questionamento", "pos": "substantivo"},
+    "problem": {"translation": "problema, dificuldade", "pos": "substantivo"},
+    "time": {"translation": "tempo, hora, vez", "pos": "substantivo"},
+    "life": {"translation": "vida", "pos": "substantivo"},
+    "people": {"translation": "pessoas, gente", "pos": "substantivo"},
+    "friend": {"translation": "amigo, amiga", "pos": "substantivo"},
+    "coworker": {"translation": "colega de trabalho", "pos": "substantivo"},
+    "neighbor": {"translation": "vizinho, vizinha", "pos": "substantivo"},
+    "neighborhood": {"translation": "bairro, vizinhança", "pos": "substantivo"},
+    "family": {"translation": "família", "pos": "substantivo"},
+    "school": {"translation": "escola, colégio", "pos": "substantivo"},
+    "work": {"translation": "trabalhar, trabalho", "pos": "verbo / substantivo"},
+    "day": {"translation": "dia", "pos": "substantivo"},
+    "way": {"translation": "maneira, jeito, caminho", "pos": "substantivo"},
+    "thing": {"translation": "coisa, situação", "pos": "substantivo"},
+    "someone": {"translation": "alguém", "pos": "pronome"},
+    "everyone": {"translation": "todos, todo mundo", "pos": "pronome"},
+    "anyone": {"translation": "qualquer pessoa, ninguém", "pos": "pronome"},
+    "give": {"translation": "dar, entregar", "pos": "verbo"},
+    "find": {"translation": "encontrar, achar", "pos": "verbo"},
+    "show": {"translation": "mostrar, apresentar", "pos": "verbo"},
+    "hear": {"translation": "ouvir, escutar", "pos": "verbo"},
+    "write": {"translation": "escrever", "pos": "verbo"},
+    "read": {"translation": "ler", "pos": "verbo"},
+    "speak": {"translation": "falar, conversar", "pos": "verbo"},
+    "difficult": {"translation": "difícil, complicado", "pos": "adjetivo"},
+    "easy": {"translation": "fácil, simples", "pos": "adjetivo"},
+    "hard": {"translation": "difícil, duro, pesado", "pos": "adjetivo"},
+    "rude": {"translation": "rude, grosseiro, mal-educado", "pos": "adjetivo"},
+    "wonderful": {"translation": "maravilhoso, incrível", "pos": "adjetivo"},
+    "great": {"translation": "ótimo, excelente, grande", "pos": "adjetivo"},
+    "important": {"translation": "importante, relevante", "pos": "adjetivo"},
+    "carefully": {"translation": "cuidadosamente, com cuidado", "pos": "advérbio"},
+    "seriously": {"translation": "seriamente, falando sério", "pos": "advérbio"},
+    "always": {"translation": "sempre", "pos": "advérbio"},
+    "never": {"translation": "nunca, jamais", "pos": "advérbio"},
+    "sometimes": {"translation": "às vezes, de vez em quando", "pos": "advérbio"},
+    "really": {"translation": "realmente, muito, de verdade", "pos": "advérbio"},
+    "together": {"translation": "juntos, em conjunto", "pos": "advérbio"},
+    "away": {"translation": "longe, embora", "pos": "advérbio"},
+    "right": {"translation": "certo, correto, direito", "pos": "adjetivo"},
+    "wrong": {"translation": "errado, incorreto", "pos": "adjetivo"},
+}
+
+
 @router.post("/translate", response_model=TranslateResponse)
 def translate_text(
     payload: TranslateRequest,
@@ -49,6 +131,13 @@ def translate_text(
     cache_key = text.lower()
     if cache_key in _TRANSLATION_CACHE:
         return TranslateResponse(original=text, translation=_TRANSLATION_CACHE[cache_key])
+
+    # Strategy 0: Instant built-in core dictionary lookup for single clean words
+    clean_single = re.sub(r'[^a-zA-Z]', '', text.lower())
+    if " " not in text and clean_single in CORE_DICTIONARY:
+        primary = CORE_DICTIONARY[clean_single]["translation"].split(",")[0].strip()
+        _TRANSLATION_CACHE[cache_key] = primary
+        return TranslateResponse(original=text, translation=primary)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -141,75 +230,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-
-
-CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
-    "think": {"translation": "pensar, achar, acreditar", "pos": "verbo"},
-    "look": {"translation": "olhar, parecer, buscar", "pos": "verbo"},
-    "get": {"translation": "obter, conseguir, ficar, entender", "pos": "verbo"},
-    "take": {"translation": "levar, tomar, pegar", "pos": "verbo"},
-    "see": {"translation": "ver, enxergar, entender", "pos": "verbo"},
-    "know": {"translation": "saber, conhecer", "pos": "verbo"},
-    "make": {"translation": "fazer, criar, tornar", "pos": "verbo"},
-    "say": {"translation": "dizer, falar", "pos": "verbo"},
-    "tell": {"translation": "contar, dizer a alguém", "pos": "verbo"},
-    "feel": {"translation": "sentir, achar", "pos": "verbo"},
-    "want": {"translation": "querer, desejar", "pos": "verbo"},
-    "need": {"translation": "precisar, necessitar", "pos": "verbo"},
-    "mean": {"translation": "significar, pretender", "pos": "verbo"},
-    "keep": {"translation": "manter, continuar", "pos": "verbo"},
-    "help": {"translation": "ajudar, ajuda", "pos": "verbo"},
-    "talk": {"translation": "conversar, falar", "pos": "verbo"},
-    "listen": {"translation": "ouvir, escutar", "pos": "verbo"},
-    "handle": {"translation": "lidar com, aguentar, manusear", "pos": "verbo"},
-    "deal": {"translation": "lidar, tratar, acordo", "pos": "verbo"},
-    "face": {"translation": "encarar, enfrentar, rosto", "pos": "verbo / substantivo"},
-    "run": {"translation": "correr, fugir, executar", "pos": "verbo"},
-    "walk": {"translation": "andar, caminhar", "pos": "verbo"},
-    "live": {"translation": "viver, morar", "pos": "verbo"},
-    "stay": {"translation": "ficar, permanecer", "pos": "verbo"},
-    "leave": {"translation": "deixar, partir, sair", "pos": "verbo"},
-    "stop": {"translation": "parar, interromper", "pos": "verbo"},
-    "start": {"translation": "começar, iniciar", "pos": "verbo"},
-    "try": {"translation": "tentar, experimentar", "pos": "verbo"},
-    "ask": {"translation": "perguntar, pedir", "pos": "verbo"},
-    "answer": {"translation": "responder, resposta", "pos": "verbo / substantivo"},
-    "question": {"translation": "pergunta, questionamento", "pos": "substantivo"},
-    "problem": {"translation": "problema, dificuldade", "pos": "substantivo"},
-    "time": {"translation": "tempo, hora, vez", "pos": "substantivo"},
-    "life": {"translation": "vida", "pos": "substantivo"},
-    "people": {"translation": "pessoas, gente", "pos": "substantivo"},
-    "friend": {"translation": "amigo, amiga", "pos": "substantivo"},
-    "coworker": {"translation": "colega de trabalho", "pos": "substantivo"},
-    "neighbor": {"translation": "vizinho, vizinha", "pos": "substantivo"},
-    "neighborhood": {"translation": "bairro, vizinhança", "pos": "substantivo"},
-    "family": {"translation": "família", "pos": "substantivo"},
-    "school": {"translation": "escola, colégio", "pos": "substantivo"},
-    "work": {"translation": "trabalhar, trabalho", "pos": "verbo / substantivo"},
-    "day": {"translation": "dia", "pos": "substantivo"},
-    "way": {"translation": "maneira, jeito, caminho", "pos": "substantivo"},
-    "thing": {"translation": "coisa, situação", "pos": "substantivo"},
-    "someone": {"translation": "alguém", "pos": "pronome"},
-    "everyone": {"translation": "todos, todo mundo", "pos": "pronome"},
-    "anyone": {"translation": "qualquer pessoa, ninguém", "pos": "pronome"},
-    "difficult": {"translation": "difícil, complicado", "pos": "adjetivo"},
-    "easy": {"translation": "fácil, simples", "pos": "adjetivo"},
-    "hard": {"translation": "difícil, duro, pesado", "pos": "adjetivo"},
-    "rude": {"translation": "rude, grosseiro, mal-educado", "pos": "adjetivo"},
-    "wonderful": {"translation": "maravilhoso, incrível", "pos": "adjetivo"},
-    "great": {"translation": "ótimo, excelente, grande", "pos": "adjetivo"},
-    "important": {"translation": "importante, relevante", "pos": "adjetivo"},
-    "carefully": {"translation": "cuidadosamente, com cuidado", "pos": "advérbio"},
-    "seriously": {"translation": "seriamente, falando sério", "pos": "advérbio"},
-    "always": {"translation": "sempre", "pos": "advérbio"},
-    "never": {"translation": "nunca, jamais", "pos": "advérbio"},
-    "sometimes": {"translation": "às vezes, de vez em quando", "pos": "advérbio"},
-    "really": {"translation": "realmente, muito, de verdade", "pos": "advérbio"},
-    "together": {"translation": "juntos, em conjunto", "pos": "advérbio"},
-    "away": {"translation": "longe, embora", "pos": "advérbio"},
-    "right": {"translation": "certo, correto, direito", "pos": "adjetivo"},
-    "wrong": {"translation": "errado, incorreto", "pos": "adjetivo"},
-}
 
 
 @router.post("/word-info", response_model=WordInfoResponse)

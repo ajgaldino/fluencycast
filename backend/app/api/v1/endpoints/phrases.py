@@ -56,7 +56,7 @@ def create_saved_phrase(
 
 
 STOPWORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
+    "a", "above", "after", "again", "against", "all", "am", "an", "and",
     "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
     "below", "between", "both", "but", "by", "can", "can't", "cannot", "could",
     "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down",
@@ -91,7 +91,7 @@ def extract_words_from_phrases(
     with sentence context and automatic Portuguese translation.
     """
     import re
-    from app.api.v1.endpoints.ai import translate_text, TranslateRequest
+    from app.api.v1.endpoints.ai import translate_text, TranslateRequest, CORE_DICTIONARY
 
     query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
     if video_id:
@@ -112,7 +112,7 @@ def extract_words_from_phrases(
     seen_in_batch = set()
 
     for item in saved_sentences:
-        raw_words = re.findall(r'\b[a-zA-Z]{4,}\b', item.text)
+        raw_words = re.findall(r'\b[a-zA-Z]{3,}\b', item.text)
         candidates = [
             w.lower() for w in raw_words
             if w.lower() not in STOPWORDS
@@ -120,10 +120,12 @@ def extract_words_from_phrases(
             and w.lower() not in seen_in_batch
         ]
 
-        for word in candidates[:3]:
+        for word in candidates[:10]:
             seen_in_batch.add(word)
             tr = translate_text(TranslateRequest(text=word), current_user=current_user)
             trans = tr.translation if tr.translation.lower() != word else ""
+            if not trans and word in CORE_DICTIONARY:
+                trans = CORE_DICTIONARY[word]["translation"].split(",")[0].strip()
 
             word_phrase = SavedPhrase(
                 user_id=current_user.id,
@@ -140,9 +142,9 @@ def extract_words_from_phrases(
             db.add(word_phrase)
             created_word_cards.append(word_phrase)
 
-            if len(created_word_cards) >= 20:
+            if len(created_word_cards) >= 60:
                 break
-        if len(created_word_cards) >= 20:
+        if len(created_word_cards) >= 60:
             break
 
     db.commit()
