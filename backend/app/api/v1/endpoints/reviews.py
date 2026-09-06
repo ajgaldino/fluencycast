@@ -48,11 +48,25 @@ def get_review_summary(
         .count()
     )
     streak = current_user.profile.current_streak if current_user.profile else 0
+
+    # Count reviews done today
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    reviewed_today = (
+        db.query(PhraseReview)
+        .join(SavedPhrase, PhraseReview.saved_phrase_id == SavedPhrase.id)
+        .filter(
+            SavedPhrase.user_id == current_user.id,
+            PhraseReview.reviewed_at >= today_start
+        )
+        .count()
+    )
+
     return DailyReviewSummary(
         due_phrases_count=due_count,
         mastered_count=mastered_count,
         learning_count=learning_count,
-        streak_days=streak
+        streak_days=streak,
+        reviewed_today_count=reviewed_today
     )
 
 

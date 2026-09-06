@@ -700,9 +700,33 @@ export const VideoStudy: React.FC = () => {
 
     // Pick a candidate word to blank out
     const target = words[Math.floor(Math.random() * words.length)];
-    // Generate 3 distractors
-    const pool = ['difficult', 'energy', 'people', 'always', 'listen', 'important', 'friend', 'together', 'problem', 'conversation'];
-    const distractors = pool.filter((p) => p.toLowerCase() !== target.toLowerCase()).slice(0, 3);
+
+    // Generate contextual distractors from the entire video transcript
+    const allVideoWords = new Set<string>();
+    displayedSegments.forEach((s) => {
+      s.text.split(/\s+/).forEach((w) => {
+        const clean = w.replace(/[^a-zA-Z]/g, '');
+        if (clean.length >= 3 && clean.toLowerCase() !== target.toLowerCase()) {
+          allVideoWords.add(clean.toLowerCase());
+        }
+      });
+    });
+
+    // Prefer words with similar length to the target for better distractors
+    const targetLen = target.length;
+    const candidates = Array.from(allVideoWords)
+      .sort((a, b) => Math.abs(a.length - targetLen) - Math.abs(b.length - targetLen));
+
+    // Pick 3 distractors (prioritize similar-length words)
+    const distractors = candidates.slice(0, 3);
+    // Fallback if not enough words from transcript
+    const fallbackPool = ['difficult', 'energy', 'people', 'always', 'listen', 'important', 'friend', 'together'];
+    while (distractors.length < 3) {
+      const fallback = fallbackPool.find((f) => !distractors.includes(f) && f.toLowerCase() !== target.toLowerCase());
+      if (fallback) distractors.push(fallback);
+      else break;
+    }
+
     const shuffled = [target, ...distractors].sort(() => Math.random() - 0.5);
 
     setQuizSeg(seg);
@@ -1294,12 +1318,35 @@ export const VideoStudy: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--bg-glass)', padding: '0.65rem', borderRadius: 'var(--radius-sm)', marginBottom: '1.25rem' }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--bg-glass)', padding: '0.65rem', borderRadius: 'var(--radius-sm)', marginBottom: wordModalData.tip ? '0.75rem' : '1.25rem' }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>
                 EXEMPLO NA FALA:
               </div>
               "{wordModalData.example}"
             </div>
+
+            {wordModalData.tip && (
+              <div style={{
+                fontSize: '0.84rem',
+                color: 'var(--accent-amber)',
+                background: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: '1.25rem',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.45rem'
+              }}>
+                <Sparkles size={16} color="var(--accent-amber)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <strong style={{ display: 'block', fontSize: '0.72rem', textTransform: 'uppercase', marginBottom: '0.15rem' }}>
+                    Dica Prática de Uso:
+                  </strong>
+                  <span>{wordModalData.tip}</span>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button

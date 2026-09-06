@@ -15,9 +15,12 @@ export const Dashboard: React.FC = () => {
     mastered_count: 0,
     learning_count: 0,
     streak_days: 1,
+    reviewed_today_count: 0,
   });
   const [recentVideos, setRecentVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const dailyGoal = 15; // Daily cards review goal
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -28,6 +31,7 @@ export const Dashboard: React.FC = () => {
             mastered_count: 0,
             learning_count: 0,
             streak_days: user?.profile?.current_streak || 1,
+            reviewed_today_count: 0,
           })),
           videoService.getVideos().catch(() => []),
         ]);
@@ -42,6 +46,7 @@ export const Dashboard: React.FC = () => {
 
   const firstName = user?.full_name ? user.full_name.split(' ')[0] : 'Estudante';
   const lastVideo = recentVideos[0];
+  const goalProgress = Math.min(100, Math.round(((summary.reviewed_today_count || 0) / dailyGoal) * 100));
 
   return (
     <div>
@@ -59,13 +64,13 @@ export const Dashboard: React.FC = () => {
         </p>
       </div>
 
-      {/* Review Call-to-Action Card */}
+      {/* Review Call-to-Action Card with Daily Goal Tracker */}
       <div className="card" style={{
         marginBottom: '1.5rem',
         background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.1) 100%)',
         border: '1px solid rgba(99, 102, 241, 0.3)'
       }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+        <div className="flex-between" style={{ flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-link)', fontWeight: 600, fontSize: '0.88rem', marginBottom: '0.3rem' }}>
               <BrainCircuit size={18} />
@@ -87,6 +92,36 @@ export const Dashboard: React.FC = () => {
             <span>Iniciar Revisão</span>
             <ArrowRight size={16} />
           </Link>
+        </div>
+
+        {/* Daily Goal Bar */}
+        <div style={{
+          paddingTop: '0.85rem',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+        }}>
+          <div className="flex-between" style={{ fontSize: '0.82rem', marginBottom: '0.4rem' }}>
+            <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              🎯 Meta Diária: <strong style={{ color: '#fff' }}>{summary.reviewed_today_count || 0}/{dailyGoal} revisados hoje</strong>
+            </span>
+            <span style={{ color: goalProgress >= 100 ? 'var(--accent-emerald)' : 'var(--accent-cyan)', fontWeight: 700 }}>
+              {goalProgress >= 100 ? '🎉 Meta batida!' : `${goalProgress}%`}
+            </span>
+          </div>
+          <div style={{
+            width: '100%',
+            height: '6px',
+            background: 'rgba(255, 255, 255, 0.1)',
+            borderRadius: '999px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              width: `${goalProgress}%`,
+              height: '100%',
+              background: goalProgress >= 100 ? 'var(--accent-emerald)' : 'linear-gradient(90deg, var(--primary) 0%, var(--accent-cyan) 100%)',
+              borderRadius: '999px',
+              transition: 'width 0.4s ease'
+            }} />
+          </div>
         </div>
       </div>
 

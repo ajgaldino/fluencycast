@@ -21,9 +21,12 @@ export interface UpdatePhrasePayload {
 }
 
 export const phraseService = {
-  async getPhrases(status?: string): Promise<SavedPhrase[]> {
-    const query = status ? `?status=${status}` : '';
-    return request<SavedPhrase[]>(`/phrases/${query}`);
+  async getPhrases(status?: string, phraseType?: string): Promise<SavedPhrase[]> {
+    const params = new URLSearchParams();
+    if (status && status !== 'ALL') params.append('status', status);
+    if (phraseType && phraseType !== 'ALL') params.append('phrase_type', phraseType);
+    const qs = params.toString();
+    return request<SavedPhrase[]>(`/phrases/${qs ? `?${qs}` : ''}`);
   },
 
   async savePhrase(data: CreatePhrasePayload): Promise<SavedPhrase> {

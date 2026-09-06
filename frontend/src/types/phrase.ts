@@ -23,4 +23,5 @@ export interface ReviewSummary {
   mastered_count: number;
   learning_count: number;
   streak_days: number;
+  reviewed_today_count: number;
 }

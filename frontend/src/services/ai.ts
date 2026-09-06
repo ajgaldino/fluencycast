@@ -135,6 +135,7 @@ export interface WordInfoResponse {
   part_of_speech: string;
   definition: string;
   example: string;
+  tip?: string;
 }
 
 export interface ChatResponse {

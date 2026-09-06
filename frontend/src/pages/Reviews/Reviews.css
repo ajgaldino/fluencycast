@@ -1,0 +1,269 @@
+/* ==========================================================================
+   Reviews (Spaced Repetition) Famous Apps Style (Anki, Duolingo, Memrise)
+   ========================================================================== */
+
+.reviews-container {
+  max-width: 620px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* Floating XP Animation */
+.floating-xp {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--accent-amber);
+  text-shadow: 0 0 16px rgba(245, 158, 11, 0.7);
+  animation: floatUpFade 1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+@keyframes floatUpFade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -30%) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -90%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(0.9);
+  }
+}
+
+/* Combo Fire Indicator */
+.combo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(239, 68, 68, 0.2) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--accent-amber);
+  animation: fireGlow 1.8s infinite ease-in-out;
+}
+
+@keyframes fireGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+    transform: scale(1.03);
+  }
+}
+
+/* Progress bar */
+.srs-progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.srs-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--accent-cyan) 100%);
+  border-radius: var(--radius-full);
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+
+/* Flashcard Box with 3D Depth */
+.srs-flashcard {
+  perspective: 1000px;
+  min-height: 290px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.85rem 1.6rem;
+  margin-bottom: 1.25rem;
+  position: relative;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border-subtle);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  animation: cardEntry 0.3s ease-out;
+}
+
+@keyframes cardEntry {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Speed Recall (Multiple Choice) Chips */
+.quiz-choice-btn {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1.1rem;
+  color: var(--text-primary);
+  font-size: 0.96rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.quiz-choice-btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.2);
+}
+
+.quiz-choice-btn.correct {
+  background: rgba(16, 185, 129, 0.18) !important;
+  border-color: var(--accent-emerald) !important;
+  color: #fff !important;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.35);
+}
+
+.quiz-choice-btn.wrong {
+  background: rgba(244, 63, 94, 0.18) !important;
+  border-color: var(--accent-rose) !important;
+  color: #fff !important;
+  animation: shake 0.35s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* SM-2 Anki 4-Button Grade Grid */
+.anki-grade-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.55rem;
+}
+
+.anki-grade-btn {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.anki-grade-btn:hover {
+  transform: translateY(-2px);
+}
+
+.anki-grade-btn:active {
+  transform: translateY(0);
+}
+
+.anki-grade-btn .grade-emoji {
+  font-size: 1.35rem;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.anki-grade-btn .grade-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.anki-grade-btn .grade-interval {
+  font-size: 0.72rem;
+  opacity: 0.8;
+  margin-top: 0.15rem;
+}
+
+.anki-grade-btn .grade-shortcut {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 0.65rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+
+/* Keyboard Shortcut Ribbon */
+.keyboard-shortcuts-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  padding: 0.45rem 0.8rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  margin-top: 1.1rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.kbd-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-right: 0.25rem;
+}
+
+/* Celebration Screen Pop */
+.celebration-pop {
+  animation: celebratePop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes celebratePop {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  70% {
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

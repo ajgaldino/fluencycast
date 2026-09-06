@@ -25,3 +25,4 @@ class DailyReviewSummary(BaseModel):
     mastered_count: int
     learning_count: int
     streak_days: int
+    reviewed_today_count: int = 0
