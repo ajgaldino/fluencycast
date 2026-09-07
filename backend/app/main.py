@@ -13,6 +13,10 @@ async def lifespan(app: FastAPI):
     # Try to auto-create tables on startup (ignored if DB not yet reachable or handled by Alembic)
     try:
         Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text("ALTER TABLE saved_phrases ALTER COLUMN video_id DROP NOT NULL;"))
+            conn.commit()
     except Exception as e:
         print(f"Notice: Database connection deferred or handled by Alembic: {e}")
     yield

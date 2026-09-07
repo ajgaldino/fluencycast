@@ -18,6 +18,7 @@ import {
   Layers,
   CheckCircle,
   PlusCircle,
+  Plus,
   RefreshCw
 } from 'lucide-react';
 
@@ -30,9 +31,20 @@ export const Phrases: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [extractingWords, setExtractingWords] = useState(false);
   const [extractionMessage, setExtractionMessage] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const [visibleTranslations, setVisibleTranslations] = useState<Record<string, boolean>>({});
   const [translatingIds, setTranslatingIds] = useState<Record<string, boolean>>({});
+
+  // Manual Create Modal state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createType, setCreateType] = useState<'SENTENCE' | 'WORD'>('SENTENCE');
+  const [createText, setCreateText] = useState('');
+  const [createTranslation, setCreateTranslation] = useState('');
+  const [createContext, setCreateContext] = useState('');
+  const [createDifficulty, setCreateDifficulty] = useState<string>('NORMAL');
+  const [savingCreate, setSavingCreate] = useState(false);
+  const [aiTranslatingCreate, setAiTranslatingCreate] = useState(false);
 
   // Editing state
   const [editingPhrase, setEditingPhrase] = useState<SavedPhrase | null>(null);
@@ -112,6 +124,95 @@ export const Phrases: React.FC = () => {
       alert(err.message || 'Falha na tradução automática.');
     } finally {
       setTranslatingIds((prev) => ({ ...prev, [phrase.id]: false }));
+    }
+  };
+
+  // Open Manual Create Modal
+  const handleOpenCreate = (type?: 'SENTENCE' | 'WORD') => {
+    setCreateType(type || activeTab);
+    setCreateText('');
+    setCreateTranslation('');
+    setCreateContext('');
+    setCreateDifficulty('NORMAL');
+    setIsCreateModalOpen(true);
+  };
+
+  // AI Translate inside Create Modal
+  const handleAiTranslateCreate = async () => {
+    const query = createText.trim();
+    if (!query) return;
+    try {
+      setAiTranslatingCreate(true);
+      const res = await aiService.translate(query);
+      if (res.translation && res.translation.toLowerCase() !== query.toLowerCase()) {
+        setCreateTranslation(res.translation);
+      }
+    } catch (err) {
+      alert('Não foi possível obter a tradução com IA no momento.');
+    } finally {
+      setAiTranslatingCreate(false);
+    }
+  };
+
+  // Save New Manual Phrase or Word
+  const handleSaveCreate = async () => {
+    const cleanText = createText.trim();
+    if (!cleanText) {
+      alert(`O texto da ${createType === 'WORD' ? 'palavra' : 'frase'} em inglês não pode ficar vazio.`);
+      return;
+    }
+
+    try {
+      setSavingCreate(true);
+      let translationToSave = createTranslation.trim();
+
+      // If translation wasn't provided by user, auto-translate with AI
+      if (!translationToSave) {
+        try {
+          const aiRes = await aiService.translate(cleanText);
+          if (aiRes.translation && aiRes.translation.toLowerCase() !== cleanText.toLowerCase()) {
+            translationToSave = aiRes.translation;
+          }
+        } catch {
+          // Proceed without translation if offline or AI fails
+        }
+      }
+
+      const created = await phraseService.savePhrase({
+        text: cleanText,
+        translation: translationToSave || null,
+        context_sentence: createContext.trim() || null,
+        phrase_type: createType,
+        difficulty: createDifficulty,
+        status: 'NEW',
+      });
+
+      // Update local phrases list
+      setPhrases((prev) => {
+        const idx = prev.findIndex((p) => p.id === created.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = created;
+          return updated;
+        }
+        return [created, ...prev];
+      });
+
+      // Ensure translation is visible for this item
+      setVisibleTranslations((prev) => ({ ...prev, [created.id]: true }));
+
+      // Switch to the relevant tab so the user sees it immediately
+      setActiveTab(createType);
+
+      // Show success feedback
+      setActionFeedback(`🎉 ${createType === 'WORD' ? 'Palavra' : 'Frase'} "${cleanText}" adicionada com sucesso!`);
+      setTimeout(() => setActionFeedback(null), 5000);
+
+      setIsCreateModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao salvar item.');
+    } finally {
+      setSavingCreate(false);
     }
   };
 
@@ -209,30 +310,78 @@ export const Phrases: React.FC = () => {
           </p>
         </div>
 
-        {/* Quick Extract Action Button in Header */}
-        <button
-          onClick={handleExtractWords}
-          disabled={extractingWords}
-          className="btn btn-secondary"
-          style={{
-            borderColor: 'var(--accent-cyan)',
-            color: 'var(--accent-cyan)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.5rem 1rem',
-            fontSize: '0.85rem'
-          }}
-          title="Extrair palavras-chave das frases salvas para criar cards de vocabulário"
-        >
-          {extractingWords ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <Sparkles size={16} />
-          )}
-          <span>{extractingWords ? 'Extraindo...' : '⚡ Extrair Palavras das Frases'}</span>
-        </button>
+        {/* Header Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => handleOpenCreate()}
+            className="btn btn-primary"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              padding: '0.55rem 1.15rem',
+              fontSize: '0.88rem',
+              fontWeight: 600,
+              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
+            }}
+            title="Adicionar manualmente uma nova frase ou palavra para estudar"
+          >
+            <Plus size={17} />
+            <span>Adicionar {activeTab === 'WORD' ? 'Palavra' : 'Frase'}</span>
+          </button>
+
+          <button
+            onClick={handleExtractWords}
+            disabled={extractingWords}
+            className="btn btn-secondary"
+            style={{
+              borderColor: 'var(--accent-cyan)',
+              color: 'var(--accent-cyan)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.55rem 0.95rem',
+              fontSize: '0.85rem'
+            }}
+            title="Extrair palavras-chave das frases salvas para criar cards de vocabulário"
+          >
+            {extractingWords ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            <span>{extractingWords ? 'Extraindo...' : '⚡ Extrair Palavras'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Action Feedback Banner */}
+      {actionFeedback && (
+        <div style={{
+          background: 'rgba(16, 185, 129, 0.12)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: 'var(--radius-md)',
+          padding: '0.75rem 1rem',
+          marginBottom: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          color: 'var(--accent-emerald)',
+          fontSize: '0.88rem',
+          animation: 'modalSlideUp 0.2s ease-out'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle size={17} />
+            <span>{actionFeedback}</span>
+          </div>
+          <button
+            onClick={() => setActionFeedback(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {/* Extraction Feedback Banner */}
       {extractionMessage && (
@@ -404,31 +553,51 @@ export const Phrases: React.FC = () => {
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '460px', margin: '0 auto' }}>
                 {searchQuery
                   ? `Nenhuma frase corresponde a "${searchQuery}".`
-                  : 'Ao assistir a qualquer vídeo ou música, clique sobre qualquer frase da transcrição para salvá-la aqui.'}
+                  : 'Ao assistir a qualquer vídeo ou música, clique sobre qualquer frase da transcrição para salvá-la, ou adicione manualmente abaixo.'}
               </p>
+              <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+                <button
+                  onClick={() => handleOpenCreate('SENTENCE')}
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
+                >
+                  <Plus size={16} />
+                  <span>Adicionar Frase Manualmente</span>
+                </button>
+              </div>
             </>
           ) : (
             <>
               <Layers size={36} color="var(--accent-cyan)" style={{ margin: '0 auto 1rem auto' }} />
               <h3 style={{ fontSize: '1.15rem', marginBottom: '0.4rem' }}>
-                {searchQuery ? 'Nenhuma palavra encontrada' : 'Nenhuma palavra extraída ainda'}
+                {searchQuery ? 'Nenhuma palavra encontrada' : 'Nenhuma palavra adicionada ainda'}
               </h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '460px', margin: '0 auto 1.25rem auto' }}>
                 {searchQuery
                   ? `Nenhuma palavra corresponde a "${searchQuery}".`
-                  : 'Extraia palavras-chave automaticamente das frases que você já salvou para criar cards individuais de vocabulário.'}
+                  : 'Adicione palavras manualmente para expandir seu vocabulário ou extraia automaticamente das frases que você já salvou.'}
               </p>
-              {!searchQuery && sentenceItems.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <button
-                  onClick={handleExtractWords}
-                  disabled={extractingWords}
+                  onClick={() => handleOpenCreate('WORD')}
                   className="btn btn-primary"
-                  style={{ margin: '0 auto' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
                 >
-                  {extractingWords ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                  <span>Extrair Palavras Agora</span>
+                  <Plus size={16} />
+                  <span>Adicionar Palavra Manualmente</span>
                 </button>
-              )}
+                {!searchQuery && sentenceItems.length > 0 && (
+                  <button
+                    onClick={handleExtractWords}
+                    disabled={extractingWords}
+                    className="btn btn-secondary"
+                    style={{ borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}
+                  >
+                    {extractingWords ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    <span>Extrair das Frases</span>
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -733,6 +902,250 @@ export const Phrases: React.FC = () => {
                   <Check size={16} />
                 )}
                 <span>Salvar Alterações</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MANUAL CREATE MODAL */}
+      {isCreateModalOpen && (
+        <div className="ai-modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
+          <div className="ai-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+            <div className="flex-between" style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700, fontSize: '1.15rem' }}>
+                <div style={{
+                  background: 'linear-gradient(135deg, var(--primary), var(--secondary))',
+                  borderRadius: '8px',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)'
+                }}>
+                  <Plus size={18} color="#fff" />
+                </div>
+                <span>Adicionar {createType === 'WORD' ? 'Palavra' : 'Frase'} Manualmente</span>
+              </div>
+              <button
+                onClick={() => setIsCreateModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Switcher Tab between Sentence and Word inside Modal */}
+            <div style={{
+              display: 'flex',
+              background: 'rgba(255, 255, 255, 0.05)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.25rem',
+              marginBottom: '1.25rem',
+              gap: '0.25rem'
+            }}>
+              <button
+                type="button"
+                onClick={() => setCreateType('SENTENCE')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: createType === 'SENTENCE' ? 700 : 500,
+                  fontSize: '0.88rem',
+                  background: createType === 'SENTENCE' ? 'var(--primary)' : 'transparent',
+                  color: createType === 'SENTENCE' ? '#fff' : 'var(--text-secondary)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Bookmark size={15} />
+                <span>💬 Frase Completa</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCreateType('WORD')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: createType === 'WORD' ? 700 : 500,
+                  fontSize: '0.88rem',
+                  background: createType === 'WORD' ? 'var(--accent-cyan)' : 'transparent',
+                  color: createType === 'WORD' ? '#000' : 'var(--text-secondary)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Layers size={15} />
+                <span>🔤 Palavra / Vocabulário</span>
+              </button>
+            </div>
+
+            {/* English Text Field */}
+            <div className="form-group">
+              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                {createType === 'WORD' ? 'Palavra em Inglês:' : 'Frase em Inglês:'} <span style={{ color: 'var(--accent-coral)' }}>*</span>
+              </label>
+              {createType === 'WORD' ? (
+                <input
+                  type="text"
+                  className="form-input"
+                  autoFocus
+                  placeholder="Ex: resilient, breakthrough, fathom..."
+                  value={createText}
+                  onChange={(e) => setCreateText(e.target.value)}
+                  style={{ fontSize: '1rem', fontWeight: 500 }}
+                />
+              ) : (
+                <textarea
+                  className="form-input"
+                  autoFocus
+                  rows={3}
+                  placeholder="Ex: I've been looking forward to meeting you for a long time."
+                  value={createText}
+                  onChange={(e) => setCreateText(e.target.value)}
+                  style={{ fontSize: '0.95rem' }}
+                />
+              )}
+            </div>
+
+            {/* Portuguese Translation + AI Auto Translate */}
+            <div className="form-group">
+              <div className="flex-between" style={{ marginBottom: '0.3rem' }}>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>
+                  Tradução em Português:
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAiTranslateCreate}
+                  disabled={aiTranslatingCreate || !createText.trim()}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: createText.trim() ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                    cursor: createText.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 600
+                  }}
+                  title="Traduzir o texto em inglês automaticamente usando IA"
+                >
+                  {aiTranslatingCreate ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  <span>⚡ Traduzir com IA</span>
+                </button>
+              </div>
+              <textarea
+                className="form-input"
+                rows={createType === 'WORD' ? 2 : 2}
+                placeholder={createType === 'WORD' ? 'Ex: resiliente, resistente...' : 'Ex: Estou ansioso para conhecê-lo há muito tempo.'}
+                value={createTranslation}
+                onChange={(e) => setCreateTranslation(e.target.value)}
+                style={{ fontSize: '0.95rem' }}
+              />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                Dica: Você pode deixar em branco e o sistema traduzirá com IA automaticamente ao salvar.
+              </span>
+            </div>
+
+            {/* Context / Example Sentence */}
+            <div className="form-group">
+              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                {createType === 'WORD' ? 'Frase de Exemplo ou Contexto (opcional):' : 'Notas ou Contexto Adicional (opcional):'}
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                value={createContext}
+                onChange={(e) => setCreateContext(e.target.value)}
+                placeholder={createType === 'WORD' ? 'Ex: She is resilient in the face of challenges.' : 'Ex: Ouvido em uma conversa informal...'}
+              />
+            </div>
+
+            {/* Initial Difficulty Selector */}
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                Dificuldade Inicial para Repetição Espaçada:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
+                {[
+                  { value: 'EASY', label: 'Fácil', color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.15)' },
+                  { value: 'NORMAL', label: 'Normal', color: 'var(--primary)', bg: 'rgba(99, 102, 241, 0.15)' },
+                  { value: 'HARD', label: 'Difícil', color: 'var(--accent-amber)', bg: 'rgba(245, 158, 11, 0.15)' },
+                  { value: 'STRUGGLE', label: 'Muito Difícil', color: 'var(--accent-coral)', bg: 'rgba(244, 63, 94, 0.15)' },
+                ].map((d) => {
+                  const isSelected = createDifficulty === d.value;
+                  return (
+                    <button
+                      key={d.value}
+                      type="button"
+                      onClick={() => setCreateDifficulty(d.value)}
+                      style={{
+                        padding: '0.45rem 0.2rem',
+                        fontSize: '0.8rem',
+                        borderRadius: 'var(--radius-sm)',
+                        border: isSelected ? `1.5px solid ${d.color}` : '1px solid var(--border-subtle)',
+                        background: isSelected ? d.bg : 'transparent',
+                        color: isSelected ? d.color : 'var(--text-secondary)',
+                        fontWeight: isSelected ? 700 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsCreateModalOpen(false)}
+                className="btn btn-secondary"
+                disabled={savingCreate}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCreate}
+                className="btn btn-primary"
+                disabled={savingCreate || !createText.trim()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.6rem 1.4rem',
+                  boxShadow: '0 4px 12px rgba(99, 102, 241, 0.4)'
+                }}
+              >
+                {savingCreate ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Check size={16} />
+                )}
+                <span>Salvar {createType === 'WORD' ? 'Palavra' : 'Frase'}</span>
               </button>
             </div>
           </div>

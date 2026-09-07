@@ -44,13 +44,19 @@ def create_saved_phrase(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Save a new phrase from a video segment.
-    Prevents duplicate WORD cards for the same user.
+    Save a new phrase manually or from a video segment.
+    Prevents duplicate WORD cards for the same user while keeping them updated.
     """
     clean_text = phrase_in.text.strip()
+    if not clean_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O texto da frase ou palavra não pode ser vazio."
+        )
+
     p_type = (phrase_in.phrase_type or "SENTENCE").upper()
 
-    # Deduplicate single words: if already exists, do not recreate
+    # Deduplicate single words: if already exists, update translation/context and return
     if p_type == "WORD":
         existing = db.query(SavedPhrase).filter(
             SavedPhrase.user_id == current_user.id,
@@ -58,8 +64,14 @@ def create_saved_phrase(
             func.lower(SavedPhrase.text) == clean_text.lower()
         ).first()
         if existing:
+            updated = False
             if not existing.translation and phrase_in.translation:
                 existing.translation = phrase_in.translation
+                updated = True
+            if not existing.context_sentence and phrase_in.context_sentence:
+                existing.context_sentence = phrase_in.context_sentence
+                updated = True
+            if updated:
                 db.commit()
                 db.refresh(existing)
             return existing
@@ -73,8 +85,8 @@ def create_saved_phrase(
         context_sentence=phrase_in.context_sentence,
         timestamp=phrase_in.timestamp,
         phrase_type=p_type,
-        difficulty=phrase_in.difficulty or "NORMAL",
-        status="NEW"
+        difficulty=(phrase_in.difficulty or "NORMAL").upper(),
+        status=(phrase_in.status or "NEW").upper()
     )
     db.add(phrase)
     db.commit()

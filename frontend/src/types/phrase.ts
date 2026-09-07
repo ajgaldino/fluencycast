@@ -1,7 +1,7 @@
 export interface SavedPhrase {
   id: string;
   user_id: string;
-  video_id: string;
+  video_id?: string | null;
   transcript_segment_id?: string | null;
   text: string;
   translation?: string | null;

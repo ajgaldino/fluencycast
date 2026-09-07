@@ -2,7 +2,7 @@ import { request } from './api';
 import { SavedPhrase } from '../types/phrase';
 
 export interface CreatePhrasePayload {
-  video_id: string;
+  video_id?: string | null;
   transcript_segment_id?: string | null;
   text: string;
   translation?: string | null;
@@ -10,6 +10,7 @@ export interface CreatePhrasePayload {
   timestamp?: number | null;
   phrase_type?: string;
   difficulty?: string;
+  status?: string;
 }
 
 export interface UpdatePhrasePayload {

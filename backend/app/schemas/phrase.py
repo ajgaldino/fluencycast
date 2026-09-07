@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class SavedPhraseCreate(BaseModel):
-    video_id: str
+    video_id: Optional[str] = None
     transcript_segment_id: Optional[str] = None
     text: str
     translation: Optional[str] = None
@@ -12,6 +12,7 @@ class SavedPhraseCreate(BaseModel):
     timestamp: Optional[float] = None
     phrase_type: Optional[str] = "SENTENCE"  # WORD, EXPRESSION, PHRASAL_VERB, SENTENCE
     difficulty: Optional[str] = "NORMAL"
+    status: Optional[str] = "NEW"
 
 
 class SavedPhraseUpdate(BaseModel):
@@ -25,7 +26,7 @@ class SavedPhraseUpdate(BaseModel):
 class SavedPhraseResponse(BaseModel):
     id: str
     user_id: str
-    video_id: str
+    video_id: Optional[str] = None
     transcript_segment_id: Optional[str] = None
     text: str
     translation: Optional[str] = None
