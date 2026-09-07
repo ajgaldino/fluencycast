@@ -15,8 +15,11 @@ export const reviewService = {
     return request<ReviewSummary>('/reviews/summary');
   },
 
-  async getTodayReviews(phraseType?: string): Promise<SavedPhrase[]> {
-    const query = phraseType ? `?phrase_type=${phraseType}` : '';
+  async getTodayReviews(phraseType?: string, allCards?: boolean): Promise<SavedPhrase[]> {
+    const params = new URLSearchParams();
+    if (phraseType) params.append('phrase_type', phraseType);
+    if (allCards) params.append('all_cards', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
     return request<SavedPhrase[]>(`/reviews/today${query}`);
   },
 

@@ -26,7 +26,8 @@ import {
   ArrowRight,
   RefreshCw,
   Layers,
-  HelpCircle
+  HelpCircle,
+  Lightbulb
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -35,6 +36,10 @@ export const Reviews: React.FC = () => {
   const [reviewMode, setReviewMode] = useState<'SENTENCE' | 'WORD' | 'REVERSE'>('SENTENCE');
   // Study Method: Classic Flashcard vs Type-to-Answer vs Speed Recall (Multiple Choice)
   const [studyMethod, setStudyMethod] = useState<'FLASHCARD' | 'TYPE' | 'CHOICE'>('FLASHCARD');
+  // Review Scope: 'DUE' (somente agendadas/disponíveis) vs 'ALL' (todas as salvas/prática livre)
+  const [reviewScope, setReviewScope] = useState<'DUE' | 'ALL'>('DUE');
+  const [dueCount, setDueCount] = useState<number>(0);
+  const [allCount, setAllCount] = useState<number>(0);
 
   const [phrases, setPhrases] = useState<SavedPhrase[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -51,6 +56,12 @@ export const Reviews: React.FC = () => {
   const [sessionStats, setSessionStats] = useState({ graded: 0, correct: 0, totalXp: 0 });
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [autoPronounce, setAutoPronounce] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // Memrise Mem / Hint State
+  const [showMemHint, setShowMemHint] = useState(false);
+  const [memHint, setMemHint] = useState<string | null>(null);
+  const [loadingMemHint, setLoadingMemHint] = useState(false);
 
   // Type-to-Answer state
   const [typedAnswer, setTypedAnswer] = useState('');
@@ -79,13 +90,15 @@ export const Reviews: React.FC = () => {
   }, [soundEnabled]);
 
   useEffect(() => {
-    loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode);
-  }, [reviewMode]);
+    loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope);
+  }, [reviewMode, reviewScope]);
 
-  const loadReviews = async (mode: 'SENTENCE' | 'WORD') => {
+  const loadReviews = async (mode: 'SENTENCE' | 'WORD', scope: 'DUE' | 'ALL' = reviewScope) => {
     setLoading(true);
     setCurrentIndex(0);
     setShowTranslation(false);
+    setShowMemHint(false);
+    setMemHint(null);
     setFinished(false);
     setCombo(0);
     setMaxCombo(0);
@@ -95,8 +108,15 @@ export const Reviews: React.FC = () => {
     setSelectedChoice(null);
     setChoiceResult(null);
     try {
-      const data = await reviewService.getTodayReviews(mode);
+      const isAll = scope === 'ALL';
+      const [data, dueData, allData] = await Promise.all([
+        reviewService.getTodayReviews(mode, isAll),
+        reviewService.getTodayReviews(mode, false),
+        reviewService.getTodayReviews(mode, true),
+      ]);
       setPhrases(data);
+      setDueCount(dueData.length);
+      setAllCount(allData.length);
     } catch (err) {
       console.error(err);
     } finally {
@@ -199,6 +219,17 @@ export const Reviews: React.FC = () => {
     setTimeout(() => setFloatingXp(null), 1000);
   };
 
+  // Memrise Plant Growth Indicator (5 stages based on SRS intervals)
+  const masteryInfo = useMemo(() => {
+    if (!currentPhrase) return { level: 1, label: '🌱 Semente', desc: 'Iniciando aprendizado' };
+    const days = currentPhrase.interval_days || 0;
+    if (days >= 30) return { level: 5, label: '🌳 Dominado', desc: 'Memória permanente' };
+    if (days >= 11) return { level: 4, label: '🌸 Flor', desc: 'Memória de longo prazo' };
+    if (days >= 4) return { level: 3, label: '🪴 Crescendo', desc: 'Fixação intermediária' };
+    if (days >= 1) return { level: 2, label: '🌿 Broto', desc: 'Primeiras repetições' };
+    return { level: 1, label: '🌱 Semente', desc: 'Iniciando aprendizado' };
+  }, [currentPhrase]);
+
   // SM-2 Interval Calculation Display (Anki style)
   const sm2Intervals = useMemo(() => {
     if (!currentPhrase) return { again: '< 10m', hard: '1d', good: '3d', easy: '7d' };
@@ -215,6 +246,32 @@ export const Reviews: React.FC = () => {
       easy: `${easyDays}d`,
     };
   }, [currentPhrase]);
+
+  // Toggle Memrise-style "Mem" Mnemonic Tip
+  const handleToggleMemHint = async () => {
+    if (showMemHint) {
+      setShowMemHint(false);
+      return;
+    }
+    setShowMemHint(true);
+    if (!memHint && currentPhrase) {
+      if (currentPhrase.context_sentence) {
+        setMemHint(`Frase no vídeo: "${currentPhrase.context_sentence}"`);
+      } else {
+        try {
+          setLoadingMemHint(true);
+          const res = await aiService.explain(currentPhrase.text);
+          if (res && res.explanation) {
+            setMemHint(res.explanation);
+          }
+        } catch {
+          setMemHint('Associe esta palavra a uma cena ou som do seu cotidiano para fixar mais rápido.');
+        } finally {
+          setLoadingMemHint(false);
+        }
+      }
+    }
+  };
 
   // Grade Card (1 to 4)
   const handleGrade = async (quality: number) => {
@@ -256,6 +313,8 @@ export const Reviews: React.FC = () => {
     if (currentIndex + 1 < phrases.length) {
       setCurrentIndex(currentIndex + 1);
       setShowTranslation(false);
+      setShowMemHint(false);
+      setMemHint(null);
       setTypedAnswer('');
       setTypeResult(null);
       setSelectedChoice(null);
@@ -311,7 +370,12 @@ export const Reviews: React.FC = () => {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = 0.88;
+      setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
       window.speechSynthesis.speak(utterance);
+      // Safety timeout to reset wave animation
+      setTimeout(() => setIsSpeaking(false), 2200);
     }
   };
 
@@ -503,6 +567,24 @@ export const Reviews: React.FC = () => {
           </div>
         </div>
 
+        {/* Scope Selector: Somente Agendadas (Disponíveis Hoje) vs Prática Livre (Todas) */}
+        <div className="simpler-scope-selector">
+          <button
+            onClick={() => setReviewScope('DUE')}
+            className={`scope-pill-btn ${reviewScope === 'DUE' ? 'active' : ''}`}
+          >
+            <span>🎯 Disponíveis Hoje</span>
+            <span className="scope-count-badge">{dueCount}</span>
+          </button>
+          <button
+            onClick={() => setReviewScope('ALL')}
+            className={`scope-pill-btn ${reviewScope === 'ALL' ? 'active' : ''}`}
+          >
+            <span>📚 Revisar Todas (Livre)</span>
+            <span className="scope-count-badge">{allCount}</span>
+          </button>
+        </div>
+
         {/* Deck Mode Tabs */}
         <div style={{
           display: 'grid',
@@ -626,18 +708,39 @@ export const Reviews: React.FC = () => {
           <div style={{ display: 'inline-flex', padding: '1rem', background: 'rgba(16, 185, 129, 0.15)', borderRadius: '50%', marginBottom: '1.25rem' }}>
             <CheckCircle2 size={42} color="var(--accent-emerald)" />
           </div>
-          <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Tudo em dia!</h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.92rem', lineHeight: 1.6, maxWidth: '420px', margin: '0 auto 1.5rem auto' }}>
-            {effectiveMode === 'WORD'
-              ? 'Você não possui palavras pendentes no seu Deck de Vocabulário. Extraia palavras das suas frases salvas para estudar!'
-              : 'Você não tem frases pendentes de revisão hoje. Continue assistindo aos vídeos para capturar novas expressões!'}
+          <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
+            {reviewScope === 'DUE' ? 'Tudo em dia para hoje! 🎉' : 'Nenhum card cadastrado'}
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.92rem', lineHeight: 1.6, maxWidth: '440px', margin: '0 auto 1.5rem auto' }}>
+            {reviewScope === 'DUE'
+              ? `Você concluiu todas as revisões agendadas para hoje! Para acelerar ainda mais sua retenção, pratique livremente com todas as ${allCount} palavras e frases salvas.`
+              : effectiveMode === 'WORD'
+              ? 'Você ainda não possui palavras salvas no vocabulário. Adicione manualmente na biblioteca ou extraia das suas frases salvas!'
+              : 'Você ainda não salvou frases. Adicione manualmente na biblioteca ou assista a um vídeo para capturar novas expressões!'}
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxWidth: '360px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '380px', margin: '0 auto' }}>
+            {reviewScope === 'DUE' && allCount > 0 && (
+              <button
+                onClick={() => setReviewScope('ALL')}
+                className="simpler-btn"
+                style={{
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#ffffff',
+                  padding: '0.85rem 1rem',
+                  boxShadow: '0 4px 0 #3730a3',
+                  fontSize: '0.92rem'
+                }}
+              >
+                <RefreshCw size={17} />
+                <span>📚 Revisar Todas as {allCount} Palavras/Frases Agora</span>
+              </button>
+            )}
+
             {effectiveMode === 'WORD' && (
               <button
                 onClick={handleExtractWords}
-                className="btn btn-primary"
+                className="btn btn-secondary"
                 disabled={extractingWords}
               >
                 {extractingWords ? (
@@ -648,6 +751,11 @@ export const Reviews: React.FC = () => {
                 <span>⚡ Extrair Palavras das Frases Salvas</span>
               </button>
             )}
+
+            <Link to="/phrases" className="btn btn-secondary">
+              <Layers size={16} />
+              <span>Ver Minha Biblioteca</span>
+            </Link>
 
             <Link to="/videos" className="btn btn-secondary">
               <BookOpen size={16} />
@@ -713,12 +821,29 @@ export const Reviews: React.FC = () => {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '380px', margin: '0 auto' }}>
             <button
-              onClick={() => loadReviews(effectiveMode)}
+              onClick={() => loadReviews(effectiveMode, reviewScope)}
               className="btn btn-primary"
             >
               <RefreshCw size={16} />
-              <span>Revisar Mais Cards</span>
+              <span>{reviewScope === 'DUE' ? 'Checar Novas Pendências' : 'Reiniciar Prática Livre'}</span>
             </button>
+
+            {reviewScope === 'DUE' && allCount > 0 && (
+              <button
+                onClick={() => setReviewScope('ALL')}
+                className="simpler-btn"
+                style={{
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#fff',
+                  padding: '0.85rem',
+                  boxShadow: '0 4px 0 #3730a3',
+                  fontSize: '0.92rem'
+                }}
+              >
+                <RefreshCw size={16} />
+                <span>📚 Praticar Todas as Frases Salvas ({allCount})</span>
+              </button>
+            )}
 
             <Link to="/phrases" className="btn btn-secondary">
               <Layers size={16} />
@@ -731,21 +856,21 @@ export const Reviews: React.FC = () => {
           </div>
         </div>
       ) : (
-        /* ACTIVE FLASHCARD REVIEW */
+        /* ACTIVE FLASHCARD REVIEW (Memrise + Simpler English Redesign) */
         <div>
           <div
-            className="card srs-flashcard"
+            className="card memrise-card"
             style={{
               background: isReverse
-                ? 'linear-gradient(180deg, rgba(6, 182, 212, 0.08) 0%, rgba(15, 23, 42, 0.95) 100%)'
+                ? 'linear-gradient(180deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.98) 100%)'
                 : effectiveMode === 'WORD'
-                ? 'linear-gradient(180deg, rgba(168, 85, 247, 0.08) 0%, rgba(15, 23, 42, 0.95) 100%)'
-                : 'linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, rgba(15, 23, 42, 0.95) 100%)'
+                ? 'linear-gradient(180deg, rgba(168, 85, 247, 0.12) 0%, rgba(15, 23, 42, 0.98) 100%)'
+                : 'linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, rgba(15, 23, 42, 0.98) 100%)'
             }}
           >
             <div>
-              {/* Card Header */}
-              <div className="flex-between" style={{ marginBottom: '1.25rem' }}>
+              {/* Card Header: Type Badge + Memrise Plant Growth Indicator + Edit */}
+              <div className="flex-between" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <span className="badge" style={{
                   background: isReverse
                     ? 'rgba(6, 182, 212, 0.2)'
@@ -757,29 +882,27 @@ export const Reviews: React.FC = () => {
                     : effectiveMode === 'WORD'
                     ? 'var(--accent-purple)'
                     : 'var(--primary-light)',
-                  border: '1px solid currentColor'
+                  border: '1px solid currentColor',
+                  fontWeight: 800,
+                  fontSize: '0.74rem'
                 }}>
-                  {isReverse ? '🔄 PORTUGUÊS → INGLÊS' : effectiveMode === 'WORD' ? '🔤 PALAVRA-CHAVE' : '📖 FRASE EM CONTEXTO'}
+                  {isReverse ? '🔄 PT → EN' : effectiveMode === 'WORD' ? '🔤 VOCABULÁRIO' : '📖 FRASE REAL'}
                 </span>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  {/* Pronunciation Audio Button */}
-                  <button
-                    onClick={() => handleSpeak(currentPhrase.text)}
-                    className="action-btn"
-                    title="Ouvir pronúncia nativa (Atalho: R)"
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '0.35rem 0.5rem',
-                      color: 'var(--accent-cyan)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Volume2 size={16} />
-                  </button>
+                {/* Memrise Bloom / Plant Growth Tracker */}
+                <div className="memrise-growth-tracker" title={`Nível de Domínio: ${masteryInfo.label} (${masteryInfo.desc})`}>
+                  <span>{masteryInfo.label}</span>
+                  <div className="growth-dots">
+                    {[1, 2, 3, 4, 5].map((lvl) => (
+                      <div
+                        key={lvl}
+                        className={`growth-dot ${lvl <= masteryInfo.level ? 'active' : ''}`}
+                      />
+                    ))}
+                  </div>
+                </div>
 
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   {/* Edit Phrase Button */}
                   <button
                     onClick={handleOpenEdit}
@@ -795,93 +918,136 @@ export const Reviews: React.FC = () => {
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '0.3rem',
-                      fontSize: '0.8rem'
+                      fontSize: '0.78rem',
+                      fontWeight: 700
                     }}
                   >
-                    <Edit3 size={14} />
+                    <Edit3 size={13} />
                     <span>Editar</span>
                   </button>
                 </div>
               </div>
 
+              {/* Memrise Hero Audio Button */}
+              <div style={{ textAlign: 'center', margin: '0.6rem 0 0.4rem 0' }}>
+                <button
+                  onClick={() => handleSpeak(currentPhrase.text)}
+                  className={`hero-audio-btn ${isSpeaking ? 'speaking' : ''}`}
+                  title="Ouvir pronúncia nativa em inglês (Atalho: R)"
+                >
+                  <Volume2 size={26} />
+                </button>
+              </div>
+
               {/* CARD PROMPT DISPLAY */}
               {isReverse ? (
-                <div style={{ textAlign: 'center', padding: '1.25rem 0' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 700 }}>
-                    🇧🇷 COMO SE DIZ EM INGLÊS:
+                <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                  <div style={{ fontSize: '0.76rem', color: '#94a3b8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
+                    🇧🇷 Como se diz em inglês:
                   </div>
-                  <div style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--accent-cyan)', lineHeight: 1.4 }}>
+                  <div className="card-main-text" style={{ color: 'var(--accent-cyan)' }}>
                     {currentPhrase.translation || '(tradução pendente)'}
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                    Tente lembrar ou falar a frase em inglês
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Fale em voz alta ou pense na frase em inglês
                   </div>
                 </div>
               ) : effectiveMode === 'WORD' ? (
-                <div style={{ textAlign: 'center', padding: '1.25rem 0' }}>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 800, color: '#fff', letterSpacing: '0.02em', marginBottom: '0.2rem' }}>
+                <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                  <div className="card-main-text">
                     {currentPhrase.text}
                   </div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Qual o significado desta palavra?
+                  <div style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>
+                    Qual é o significado desta palavra?
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: '1.45rem', fontWeight: 700, lineHeight: 1.45, color: '#fff', marginBottom: '0.75rem', textAlign: 'center', padding: '0.75rem 0' }}>
-                  "{currentPhrase.text}"
+                <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                  <div className="card-main-text sentence">
+                    "{currentPhrase.text}"
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#94a3b8', fontWeight: 600 }}>
+                    Entendeu o sentido da frase?
+                  </div>
                 </div>
               )}
 
+              {/* Memrise "Mem" Mnemonic Tip Section */}
+              <div style={{ marginTop: '0.5rem', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleToggleMemHint}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#fbbf24',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.3rem 0.65rem',
+                    borderRadius: '8px'
+                  }}
+                >
+                  <Lightbulb size={15} />
+                  <span>{showMemHint ? 'Ocultar Dica (Mem)' : '💡 Ver Dica de Memorização'}</span>
+                </button>
+
+                {showMemHint && (
+                  <div className="mem-hint-card">
+                    <div className="mem-hint-header">
+                      <span>💡 DICA DE ASSOCIAÇÃO (MEM)</span>
+                      {loadingMemHint && <Loader2 size={13} className="animate-spin" />}
+                    </div>
+                    <div className="mem-hint-text">
+                      {loadingMemHint ? 'Buscando melhor associação com IA...' : memHint || 'Associe o som ou escrita a uma cena da sua vida para fixar melhor.'}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Real Context Sentence (for WORD cards) */}
               {effectiveMode === 'WORD' && currentPhrase.context_sentence && showTranslation && (
-                <div style={{
-                  fontSize: '0.88rem',
-                  color: 'var(--text-secondary)',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: 'var(--radius-sm)',
-                  marginTop: '0.75rem',
-                  borderLeft: '3px solid var(--accent-purple)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.5rem'
-                }}>
+                <div className="context-quote-box">
                   <div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', fontWeight: 700 }}>
-                      CONTEXTO NO VÍDEO:
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', fontWeight: 800, textTransform: 'uppercase' }}>
+                      Contexto no Vídeo:
                     </span>
-                    <span>"{currentPhrase.context_sentence}"</span>
+                    <span style={{ fontSize: '0.88rem', color: '#f1f5f9' }}>"{currentPhrase.context_sentence}"</span>
                   </div>
                   <button
                     onClick={() => handleSpeak(currentPhrase.context_sentence!)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}
+                    style={{ background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', flexShrink: 0 }}
                     title="Ouvir frase inteira"
                   >
-                    <Volume2 size={15} />
+                    <Volume2 size={18} />
                   </button>
                 </div>
               )}
             </div>
 
-            {/* METHOD 1: SPEED RECALL (MULTIPLE CHOICE) */}
+            {/* METHOD 1: SPEED RECALL (MULTIPLE CHOICE SIMPLER STYLE) */}
             {studyMethod === 'CHOICE' && (
-              <div style={{ marginTop: '1rem' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  ⚡ Escolha a tradução correta:
+              <div style={{ marginTop: '1.25rem' }}>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.55rem', fontWeight: 700 }}>
+                  ⚡ Escolha a opção correta:
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.55rem' }}>
+                <div className="simpler-choice-grid">
                   {choiceOptions.map((opt, idx) => {
                     const isTarget = isReverse
                       ? opt === currentPhrase.text
                       : opt === currentPhrase.translation;
                     const isPicked = selectedChoice === opt;
 
-                    let btnClass = 'quiz-choice-btn';
+                    let btnClass = 'simpler-choice-card';
                     if (selectedChoice) {
                       if (isTarget) btnClass += ' correct';
                       else if (isPicked) btnClass += ' wrong';
                     }
+
+                    const letters = ['A', 'B', 'C', 'D'];
 
                     return (
                       <button
@@ -890,9 +1056,12 @@ export const Reviews: React.FC = () => {
                         onClick={() => handleSelectChoice(opt)}
                         disabled={!!selectedChoice}
                       >
-                        <span>{opt}</span>
-                        {selectedChoice && isTarget && <Check size={18} color="var(--accent-emerald)" />}
-                        {selectedChoice && isPicked && !isTarget && <X size={18} color="var(--accent-rose)" />}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <span className="choice-letter-badge">{letters[idx] || idx + 1}</span>
+                          <span>{opt}</span>
+                        </div>
+                        {selectedChoice && isTarget && <Check size={20} color="#10b981" />}
+                        {selectedChoice && isPicked && !isTarget && <X size={20} color="#f43f5e" />}
                       </button>
                     );
                   })}
@@ -902,8 +1071,8 @@ export const Reviews: React.FC = () => {
 
             {/* METHOD 2: TYPE-TO-ANSWER INPUT */}
             {studyMethod === 'TYPE' && !showTranslation && (
-              <div style={{ marginTop: '1rem' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>
+              <div style={{ marginTop: '1.25rem' }}>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.45rem', fontWeight: 700 }}>
                   ✍️ {isReverse ? 'Digite a frase em inglês:' : 'Digite a tradução em português:'}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -915,15 +1084,20 @@ export const Reviews: React.FC = () => {
                     onChange={(e) => setTypedAnswer(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleTypeSubmit()}
                     placeholder={isReverse ? 'Type in English...' : 'Digite em português...'}
-                    style={{ flex: 1, fontSize: '1rem', padding: '0.6rem 0.8rem' }}
+                    style={{ flex: 1, fontSize: '1rem', padding: '0.75rem 1rem', borderRadius: '14px' }}
                   />
                   <button
                     onClick={handleTypeSubmit}
-                    className="btn btn-primary"
-                    style={{ padding: '0.6rem 1rem' }}
+                    className="simpler-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      color: '#fff',
+                      padding: '0.75rem 1.25rem',
+                      boxShadow: '0 4px 0 #065f46'
+                    }}
                     disabled={!typedAnswer.trim()}
                   >
-                    <Check size={16} />
+                    <Check size={18} />
                   </button>
                 </div>
               </div>
@@ -932,25 +1106,25 @@ export const Reviews: React.FC = () => {
             {/* TYPE RESULT FEEDBACK */}
             {studyMethod === 'TYPE' && typeResult && (
               <div style={{
-                marginTop: '0.75rem',
-                padding: '0.6rem 0.85rem',
-                borderRadius: 'var(--radius-md)',
+                marginTop: '0.85rem',
+                padding: '0.75rem 1rem',
+                borderRadius: '16px',
                 background: typeResult === 'correct'
-                  ? 'rgba(16, 185, 129, 0.12)'
+                  ? 'rgba(16, 185, 129, 0.15)'
                   : typeResult === 'close'
-                  ? 'rgba(245, 158, 11, 0.12)'
-                  : 'rgba(244, 63, 94, 0.12)',
-                border: `1px solid ${
+                  ? 'rgba(245, 158, 11, 0.15)'
+                  : 'rgba(244, 63, 94, 0.15)',
+                border: `1.5px solid ${
                   typeResult === 'correct'
-                    ? 'rgba(16, 185, 129, 0.3)'
+                    ? '#10b981'
                     : typeResult === 'close'
-                    ? 'rgba(245, 158, 11, 0.3)'
-                    : 'rgba(244, 63, 94, 0.3)'
+                    ? '#f59e0b'
+                    : '#f43f5e'
                 }`
               }}>
                 <div style={{
-                  fontWeight: 700,
-                  fontSize: '0.9rem',
+                  fontWeight: 800,
+                  fontSize: '0.92rem',
                   color: typeResult === 'correct'
                     ? 'var(--accent-emerald)'
                     : typeResult === 'close'
@@ -960,7 +1134,7 @@ export const Reviews: React.FC = () => {
                 }}>
                   {typeResult === 'correct' ? '✅ Perfeito!' : typeResult === 'close' ? '🟡 Quase lá!' : '❌ Incorreto'}
                 </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                   {isReverse ? (
                     <>Correto: <strong style={{ color: '#fff' }}>"{currentPhrase.text}"</strong></>
                   ) : (
@@ -974,21 +1148,14 @@ export const Reviews: React.FC = () => {
             {studyMethod === 'FLASHCARD' && (
               <div>
                 {showTranslation ? (
-                  <div style={{
-                    padding: '1rem',
-                    background: isReverse ? 'rgba(99, 102, 241, 0.08)' : 'rgba(6, 182, 212, 0.08)',
-                    border: isReverse ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid rgba(6, 182, 212, 0.25)',
-                    borderRadius: 'var(--radius-md)',
-                    marginTop: '1.25rem',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
-                      <Sparkles size={13} color={isReverse ? 'var(--primary-light)' : 'var(--accent-cyan)'} />
+                  <div className="revealed-answer-box">
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.35rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', textTransform: 'uppercase' }}>
+                      <Sparkles size={14} color={isReverse ? 'var(--primary-light)' : 'var(--accent-cyan)'} />
                       {isReverse ? 'EM INGLÊS:' : 'TRADUÇÃO EM PORTUGUÊS:'}
                     </div>
 
                     {isReverse ? (
-                      <div style={{ fontSize: '1.45rem', fontWeight: 700, color: '#fff' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff' }}>
                         "{currentPhrase.text}"
                       </div>
                     ) : (
@@ -999,7 +1166,7 @@ export const Reviews: React.FC = () => {
                             <span>Traduzindo com IA...</span>
                           </div>
                         ) : (
-                          <div style={{ fontSize: effectiveMode === 'WORD' ? '1.5rem' : '1.2rem', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                          <div style={{ fontSize: effectiveMode === 'WORD' ? '1.65rem' : '1.35rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>
                             {currentPhrase.translation || '(Sem tradução)'}
                           </div>
                         )}
@@ -1012,10 +1179,10 @@ export const Reviews: React.FC = () => {
                       setShowTranslation(true);
                       sfx.playFlip();
                     }}
-                    className="btn btn-secondary btn-block"
-                    style={{ marginTop: '1.5rem', padding: '0.75rem' }}
+                    className="simpler-btn simpler-reveal-btn"
+                    style={{ marginTop: '1.4rem' }}
                   >
-                    <Eye size={16} />
+                    <Eye size={18} />
                     <span>{isReverse ? 'Mostrar em Inglês (Espaço)' : 'Mostrar Tradução (Espaço)'}</span>
                   </button>
                 )}
@@ -1023,59 +1190,59 @@ export const Reviews: React.FC = () => {
             )}
           </div>
 
-          {/* SM-2 ANKI-STYLE 4-BUTTON GRADING GRID */}
+          {/* SIMPLER ENGLISH 4-BUTTON 3D TACTILE GRADING GRID */}
           <div style={{ marginTop: '1rem' }}>
-            <div style={{ textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
-              Avalie sua lembrança para calcular o próximo intervalo:
+            <div style={{ textAlign: 'center', fontSize: '0.82rem', color: '#94a3b8', fontWeight: 700, marginBottom: '0.65rem' }}>
+              Como foi sua lembrança?
             </div>
 
-            <div className="anki-grade-grid">
+            <div className="simpler-grade-grid">
               {/* 1. Errei / Again */}
               <button
                 onClick={() => handleGrade(1)}
-                className="anki-grade-btn"
-                style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: 'var(--accent-rose)' }}
+                className="simpler-grade-card grade-again"
+                title="Errei - Revisar novamente em breve"
               >
-                <span className="grade-shortcut">1</span>
-                <span className="grade-emoji">❌</span>
-                <span className="grade-name">Errei</span>
-                <span className="grade-interval">{sm2Intervals.again}</span>
+                <span className="shortcut-pill">1</span>
+                <span className="grade-icon">❌</span>
+                <span className="grade-title">Errei</span>
+                <span className="grade-subtitle">{sm2Intervals.again}</span>
               </button>
 
               {/* 2. Difícil / Hard */}
               <button
                 onClick={() => handleGrade(2)}
-                className="anki-grade-btn"
-                style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--accent-amber)' }}
+                className="simpler-grade-card grade-hard"
+                title="Difícil - Lembrou com esforço"
               >
-                <span className="grade-shortcut">2</span>
-                <span className="grade-emoji">😓</span>
-                <span className="grade-name">Difícil</span>
-                <span className="grade-interval">{sm2Intervals.hard}</span>
+                <span className="shortcut-pill">2</span>
+                <span className="grade-icon">😓</span>
+                <span className="grade-title">Difícil</span>
+                <span className="grade-subtitle">{sm2Intervals.hard}</span>
               </button>
 
               {/* 3. Bom / Good */}
               <button
                 onClick={() => handleGrade(3)}
-                className="anki-grade-btn"
-                style={{ borderColor: 'rgba(99, 102, 241, 0.4)', color: 'var(--primary-light)' }}
+                className="simpler-grade-card grade-good"
+                title="Bom - Lembrou corretamente"
               >
-                <span className="grade-shortcut">3</span>
-                <span className="grade-emoji">👍</span>
-                <span className="grade-name">Bom</span>
-                <span className="grade-interval">{sm2Intervals.good}</span>
+                <span className="shortcut-pill">3</span>
+                <span className="grade-icon">👍</span>
+                <span className="grade-title">Acertei</span>
+                <span className="grade-subtitle">{sm2Intervals.good}</span>
               </button>
 
               {/* 4. Fácil / Easy */}
               <button
                 onClick={() => handleGrade(4)}
-                className="anki-grade-btn"
-                style={{ borderColor: 'rgba(16, 185, 129, 0.4)', color: 'var(--accent-emerald)' }}
+                className="simpler-grade-card grade-easy"
+                title="Fácil - Dominado sem hesitar"
               >
-                <span className="grade-shortcut">4</span>
-                <span className="grade-emoji">⚡</span>
-                <span className="grade-name">Fácil</span>
-                <span className="grade-interval">{sm2Intervals.easy}</span>
+                <span className="shortcut-pill">4</span>
+                <span className="grade-icon">⚡</span>
+                <span className="grade-title">Dominado</span>
+                <span className="grade-subtitle">{sm2Intervals.easy}</span>
               </button>
             </div>
           </div>
@@ -1085,8 +1252,8 @@ export const Reviews: React.FC = () => {
             <span><span className="kbd-badge">Espaço</span> Virar</span>
             <span><span className="kbd-badge">1</span> Errei</span>
             <span><span className="kbd-badge">2</span> Difícil</span>
-            <span><span className="kbd-badge">3</span> Bom</span>
-            <span><span className="kbd-badge">4</span> Fácil</span>
+            <span><span className="kbd-badge">3</span> Acertei</span>
+            <span><span className="kbd-badge">4</span> Dominado</span>
             <span><span className="kbd-badge">R</span> Áudio</span>
           </div>
         </div>
