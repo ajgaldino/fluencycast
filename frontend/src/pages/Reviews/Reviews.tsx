@@ -34,8 +34,8 @@ import { Link } from 'react-router-dom';
 export const Reviews: React.FC = () => {
   // Deck Type: Sentences vs Words vs Reverse
   const [reviewMode, setReviewMode] = useState<'SENTENCE' | 'WORD' | 'REVERSE'>('SENTENCE');
-  // Study Method: Classic Flashcard vs Type-to-Answer vs Speed Recall (Multiple Choice)
-  const [studyMethod, setStudyMethod] = useState<'FLASHCARD' | 'TYPE' | 'CHOICE'>('FLASHCARD');
+  // Study Method: Multiple Choice (Simpler/Memrise) as default vs Classic Flashcard vs Type-to-Answer
+  const [studyMethod, setStudyMethod] = useState<'CHOICE' | 'FLASHCARD' | 'TYPE'>('CHOICE');
   // Review Scope: 'DUE' (somente agendadas/disponíveis) vs 'ALL' (todas as salvas/prática livre)
   const [reviewScope, setReviewScope] = useState<'DUE' | 'ALL'>('DUE');
   const [dueCount, setDueCount] = useState<number>(0);
@@ -57,6 +57,7 @@ export const Reviews: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [autoPronounce, setAutoPronounce] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Memrise Mem / Hint State
   const [showMemHint, setShowMemHint] = useState(false);
@@ -90,10 +91,20 @@ export const Reviews: React.FC = () => {
   }, [soundEnabled]);
 
   useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope);
   }, [reviewMode, reviewScope]);
 
   const loadReviews = async (mode: 'SENTENCE' | 'WORD', scope: 'DUE' | 'ALL' = reviewScope) => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
     setLoading(true);
     setCurrentIndex(0);
     setShowTranslation(false);
@@ -138,23 +149,37 @@ export const Reviews: React.FC = () => {
       .map((p) => (isReverse ? p.text : p.translation))
       .filter((t): t is string => Boolean(t && t.trim() && t !== targetAnswer));
 
-    const fallbackPool = [
+    const fallbackPoolPt = [
       'pensar, acreditar, achar',
       'entender, conseguir, ficar',
       'deixar, permitir',
       'perguntar, pedir',
       'importante, relevante',
-      'tempo, hora, vez',
+      'tempo, hora, momento',
       'trabalhar, funcionar',
       'cuidadosamente, com atenção',
-      'lidar com, aguentar',
       'amigo, parceiro',
-      'ouvir, escutar atentamente',
-      'vida real, cotidiano'
+      'ouvir, prestar atenção',
+      'vida real, cotidiano',
+      'decidir com certeza'
+    ];
+
+    const fallbackPoolEn = [
+      'to believe or think',
+      'to understand clearly',
+      'to let or allow someone',
+      'to ask for something',
+      'important and relevant',
+      'time and moment',
+      'to work and succeed',
+      'carefully with attention',
+      'friend and companion',
+      'listen carefully',
+      'real life experience'
     ];
 
     const distractors: string[] = [];
-    const combinedPool = [...pool, ...fallbackPool];
+    const combinedPool = [...pool, ...(isReverse ? fallbackPoolEn : fallbackPoolPt)];
 
     for (const item of combinedPool) {
       if (item && item !== targetAnswer && !distractors.includes(item)) {
@@ -273,7 +298,28 @@ export const Reviews: React.FC = () => {
     }
   };
 
-  // Grade Card (1 to 4)
+  // Advance to next card or finish session
+  const handleNextCard = () => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+    if (currentIndex + 1 < phrases.length) {
+      setCurrentIndex((prev) => prev + 1);
+      setShowTranslation(false);
+      setShowMemHint(false);
+      setMemHint(null);
+      setTypedAnswer('');
+      setTypeResult(null);
+      setSelectedChoice(null);
+      setChoiceResult(null);
+    } else {
+      setFinished(true);
+      sfx.playFanfare();
+    }
+  };
+
+  // Grade Card (Used in manual Flashcard mode)
   const handleGrade = async (quality: number) => {
     if (!currentPhrase) return;
 
@@ -310,22 +356,67 @@ export const Reviews: React.FC = () => {
       console.error(err);
     }
 
-    if (currentIndex + 1 < phrases.length) {
-      setCurrentIndex(currentIndex + 1);
-      setShowTranslation(false);
-      setShowMemHint(false);
-      setMemHint(null);
-      setTypedAnswer('');
-      setTypeResult(null);
-      setSelectedChoice(null);
-      setChoiceResult(null);
+    handleNextCard();
+  };
+
+  // Multiple Choice Selection (Simpler & Memrise Style - Automatic Grading)
+  const handleSelectChoice = async (opt: string) => {
+    if (selectedChoice || !currentPhrase) return;
+    setSelectedChoice(opt);
+
+    const targetAnswer = isReverse
+      ? currentPhrase.text
+      : currentPhrase.translation || 'Sem tradução cadastrada';
+
+    const isCorrect = opt.trim().toLowerCase() === targetAnswer.trim().toLowerCase();
+
+    if (isCorrect) {
+      setChoiceResult('correct');
+      sfx.playSuccess();
+      setCombo((prev) => {
+        const next = prev + 1;
+        setMaxCombo((m) => Math.max(m, next));
+        return next;
+      });
+      triggerFloatingXp('+20 XP');
+      setSessionStats((prev) => ({
+        graded: prev.graded + 1,
+        correct: prev.correct + 1,
+        totalXp: prev.totalXp + 20,
+      }));
+
+      // Automatically submit SRS review as Good (3)
+      try {
+        await reviewService.submitReview(currentPhrase.id, 3);
+      } catch (err) {
+        console.error(err);
+      }
+
+      // Auto advance smoothly after 1.25s
+      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        handleNextCard();
+      }, 1250);
     } else {
-      setFinished(true);
-      sfx.playFanfare();
+      setChoiceResult('wrong');
+      sfx.playError();
+      setCombo(0);
+      setSessionStats((prev) => ({
+        graded: prev.graded + 1,
+        correct: prev.correct,
+        totalXp: prev.totalXp + 5,
+      }));
+
+      // Automatically submit SRS review as Again (1) to re-queue it
+      try {
+        await reviewService.submitReview(currentPhrase.id, 1);
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
-  // Keyboard Shortcuts (Anki style: Space, 1, 2, 3, 4, R)
+  // Keyboard Shortcuts (Simpler & Memrise Style)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore shortcut keys if user is typing in an input or textarea
@@ -333,36 +424,66 @@ export const Reviews: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (editingPhrase) return;
 
-      if (e.code === 'Space') {
-        e.preventDefault();
-        if (!showTranslation) {
-          setShowTranslation(true);
-          sfx.playFlip();
-        } else {
-          // If translation is already visible, pressing space evaluates as "Bom" (Grade 3)
-          handleGrade(3);
-        }
-      } else if (e.key === '1') {
-        e.preventDefault();
-        handleGrade(1);
-      } else if (e.key === '2') {
-        e.preventDefault();
-        handleGrade(2);
-      } else if (e.key === '3') {
-        e.preventDefault();
-        handleGrade(3);
-      } else if (e.key === '4') {
-        e.preventDefault();
-        handleGrade(4);
-      } else if (e.key === 'r' || e.key === 'R') {
+      if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         if (currentPhrase) handleSpeak(currentPhrase.text);
+        return;
+      }
+
+      // 1. Multiple Choice mode shortcuts (Default)
+      if (studyMethod === 'CHOICE') {
+        if (!selectedChoice) {
+          if (e.key === '1' && choiceOptions[0]) {
+            e.preventDefault();
+            handleSelectChoice(choiceOptions[0]);
+          } else if (e.key === '2' && choiceOptions[1]) {
+            e.preventDefault();
+            handleSelectChoice(choiceOptions[1]);
+          } else if (e.key === '3' && choiceOptions[2]) {
+            e.preventDefault();
+            handleSelectChoice(choiceOptions[2]);
+          } else if (e.key === '4' && choiceOptions[3]) {
+            e.preventDefault();
+            handleSelectChoice(choiceOptions[3]);
+          }
+        } else {
+          if (e.code === 'Space' || e.key === 'Enter') {
+            e.preventDefault();
+            handleNextCard();
+          }
+        }
+        return;
+      }
+
+      // 2. Classic Flashcard mode shortcuts
+      if (studyMethod === 'FLASHCARD') {
+        if (e.code === 'Space') {
+          e.preventDefault();
+          if (!showTranslation) {
+            setShowTranslation(true);
+            sfx.playFlip();
+          } else {
+            handleGrade(3);
+          }
+        } else if (e.key === '1') {
+          e.preventDefault();
+          handleGrade(1);
+        } else if (e.key === '2') {
+          e.preventDefault();
+          handleGrade(2);
+        } else if (e.key === '3') {
+          e.preventDefault();
+          handleGrade(3);
+        } else if (e.key === '4') {
+          e.preventDefault();
+          handleGrade(4);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showTranslation, currentPhrase, editingPhrase, phrases.length, currentIndex]);
+  }, [showTranslation, currentPhrase, editingPhrase, phrases.length, currentIndex, studyMethod, selectedChoice, choiceOptions]);
 
   const handleSpeak = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -419,33 +540,6 @@ export const Reviews: React.FC = () => {
       }
     }
     setShowTranslation(true);
-  };
-
-  // Speed Recall Choice Selection
-  const handleSelectChoice = (opt: string) => {
-    if (selectedChoice || !currentPhrase) return;
-    setSelectedChoice(opt);
-
-    const targetAnswer = isReverse
-      ? currentPhrase.text
-      : currentPhrase.translation || 'Sem tradução cadastrada';
-
-    if (opt === targetAnswer) {
-      setChoiceResult('correct');
-      sfx.playSuccess();
-      setCombo((prev) => {
-        const next = prev + 1;
-        setMaxCombo((m) => Math.max(m, next));
-        return next;
-      });
-      triggerFloatingXp('+15 XP');
-      setShowTranslation(true);
-    } else {
-      setChoiceResult('wrong');
-      sfx.playError();
-      setCombo(0);
-      setShowTranslation(true);
-    }
   };
 
   // Extract words from saved phrases
@@ -622,7 +716,7 @@ export const Reviews: React.FC = () => {
           </button>
         </div>
 
-        {/* Study Method Switcher (Flashcard vs Type vs Speed Recall) */}
+        {/* Study Method Switcher (Quiz de Tradução vs Flashcard vs Digitação) */}
         <div style={{
           display: 'flex',
           gap: '0.4rem',
@@ -634,48 +728,48 @@ export const Reviews: React.FC = () => {
           overflowX: 'auto'
         }}>
           <button
-            onClick={() => setStudyMethod('FLASHCARD')}
-            style={{
-              flex: 1,
-              padding: '0.35rem 0.6rem',
-              borderRadius: '4px',
-              border: 'none',
-              fontSize: '0.76rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              background: studyMethod === 'FLASHCARD' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-              color: studyMethod === 'FLASHCARD' ? '#fff' : 'var(--text-muted)'
-            }}
-          >
-            🃏 Flashcard 3D
-          </button>
-          <button
             onClick={() => setStudyMethod('CHOICE')}
             style={{
-              flex: 1,
-              padding: '0.35rem 0.6rem',
-              borderRadius: '4px',
+              flex: 1.2,
+              padding: '0.4rem 0.6rem',
+              borderRadius: '6px',
               border: 'none',
-              fontSize: '0.76rem',
-              fontWeight: 600,
+              fontSize: '0.78rem',
+              fontWeight: 700,
               cursor: 'pointer',
-              background: studyMethod === 'CHOICE' ? 'rgba(6, 182, 212, 0.25)' : 'transparent',
+              background: studyMethod === 'CHOICE' ? 'rgba(6, 182, 212, 0.3)' : 'transparent',
               color: studyMethod === 'CHOICE' ? '#fff' : 'var(--text-muted)'
             }}
           >
-            ⚡ Escolha Rápida (4)
+            ⚡ Quiz de Tradução
+          </button>
+          <button
+            onClick={() => setStudyMethod('FLASHCARD')}
+            style={{
+              flex: 1,
+              padding: '0.4rem 0.6rem',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: studyMethod === 'FLASHCARD' ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
+              color: studyMethod === 'FLASHCARD' ? '#fff' : 'var(--text-muted)'
+            }}
+          >
+            🃏 Flashcard
           </button>
           <button
             onClick={() => setStudyMethod('TYPE')}
             style={{
               flex: 1,
-              padding: '0.35rem 0.6rem',
-              borderRadius: '4px',
+              padding: '0.4rem 0.6rem',
+              borderRadius: '6px',
               border: 'none',
-              fontSize: '0.76rem',
-              fontWeight: 600,
+              fontSize: '0.78rem',
+              fontWeight: 700,
               cursor: 'pointer',
-              background: studyMethod === 'TYPE' ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
+              background: studyMethod === 'TYPE' ? 'rgba(168, 85, 247, 0.3)' : 'transparent',
               color: studyMethod === 'TYPE' ? '#fff' : 'var(--text-muted)'
             }}
           >
@@ -1028,17 +1122,18 @@ export const Reviews: React.FC = () => {
               )}
             </div>
 
-            {/* METHOD 1: SPEED RECALL (MULTIPLE CHOICE SIMPLER STYLE) */}
+            {/* METHOD 1: SPEED RECALL (MULTIPLE CHOICE SIMPLER STYLE - AUTO GRADING) */}
             {studyMethod === 'CHOICE' && (
               <div style={{ marginTop: '1.25rem' }}>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.55rem', fontWeight: 700 }}>
-                  ⚡ Escolha a opção correta:
+                <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: '0.65rem', fontWeight: 700 }}>
+                  ⚡ Escolha a tradução correta:
                 </div>
                 <div className="simpler-choice-grid">
                   {choiceOptions.map((opt, idx) => {
-                    const isTarget = isReverse
-                      ? opt === currentPhrase.text
-                      : opt === currentPhrase.translation;
+                    const targetAnswer = isReverse
+                      ? currentPhrase.text
+                      : currentPhrase.translation || 'Sem tradução cadastrada';
+                    const isTarget = opt.trim().toLowerCase() === targetAnswer.trim().toLowerCase();
                     const isPicked = selectedChoice === opt;
 
                     let btnClass = 'simpler-choice-card';
@@ -1066,6 +1161,41 @@ export const Reviews: React.FC = () => {
                     );
                   })}
                 </div>
+
+                {/* Simpler / Memrise Bottom Feedback Bar with Action Button */}
+                {selectedChoice && (
+                  <div className={`simpler-bottom-feedback ${choiceResult === 'correct' ? 'correct' : 'wrong'}`}>
+                    <div className="feedback-info">
+                      {choiceResult === 'correct' ? (
+                        <CheckCircle2 size={32} color="#10b981" />
+                      ) : (
+                        <X size={32} color="#f43f5e" />
+                      )}
+                      <div>
+                        <div className="feedback-title">
+                          {choiceResult === 'correct' ? '🎉 Mandou bem!' : '❌ Resposta correta:'}
+                        </div>
+                        <div className="feedback-subtitle">
+                          {choiceResult === 'correct' ? (
+                            <span>Você acertou a tradução! (+20 XP)</span>
+                          ) : (
+                            <strong style={{ color: '#ffffff', fontSize: '0.96rem' }}>
+                              "{isReverse ? currentPhrase.text : currentPhrase.translation}"
+                            </strong>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleNextCard}
+                      className={`feedback-btn-next ${choiceResult === 'correct' ? 'correct' : 'wrong'}`}
+                    >
+                      <span>{choiceResult === 'correct' ? 'Continuar' : 'Entendi, Continuar'}</span>
+                      <ArrowRight size={18} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1141,6 +1271,13 @@ export const Reviews: React.FC = () => {
                     <>Correto: <strong style={{ color: 'var(--accent-cyan)' }}>"{currentPhrase.translation}"</strong></>
                   )}
                 </div>
+                <button
+                  onClick={handleNextCard}
+                  className="btn btn-primary"
+                  style={{ marginTop: '0.75rem', width: '100%' }}
+                >
+                  Continuar
+                </button>
               </div>
             )}
 
@@ -1190,71 +1327,85 @@ export const Reviews: React.FC = () => {
             )}
           </div>
 
-          {/* SIMPLER ENGLISH 4-BUTTON 3D TACTILE GRADING GRID */}
-          <div style={{ marginTop: '1rem' }}>
-            <div style={{ textAlign: 'center', fontSize: '0.82rem', color: '#94a3b8', fontWeight: 700, marginBottom: '0.65rem' }}>
-              Como foi sua lembrança?
+          {/* SIMPLER ENGLISH 4-BUTTON 3D TACTILE GRADING GRID (Shown ONLY in manual Flashcard mode) */}
+          {studyMethod === 'FLASHCARD' && showTranslation && (
+            <div style={{ marginTop: '1rem' }}>
+              <div style={{ textAlign: 'center', fontSize: '0.82rem', color: '#94a3b8', fontWeight: 700, marginBottom: '0.65rem' }}>
+                Como foi sua lembrança?
+              </div>
+
+              <div className="simpler-grade-grid">
+                {/* 1. Errei / Again */}
+                <button
+                  onClick={() => handleGrade(1)}
+                  className="simpler-grade-card grade-again"
+                  title="Errei - Revisar novamente em breve"
+                >
+                  <span className="shortcut-pill">1</span>
+                  <span className="grade-icon">❌</span>
+                  <span className="grade-title">Errei</span>
+                  <span className="grade-subtitle">{sm2Intervals.again}</span>
+                </button>
+
+                {/* 2. Difícil / Hard */}
+                <button
+                  onClick={() => handleGrade(2)}
+                  className="simpler-grade-card grade-hard"
+                  title="Difícil - Lembrou com esforço"
+                >
+                  <span className="shortcut-pill">2</span>
+                  <span className="grade-icon">😓</span>
+                  <span className="grade-title">Difícil</span>
+                  <span className="grade-subtitle">{sm2Intervals.hard}</span>
+                </button>
+
+                {/* 3. Bom / Good */}
+                <button
+                  onClick={() => handleGrade(3)}
+                  className="simpler-grade-card grade-good"
+                  title="Bom - Lembrou corretamente"
+                >
+                  <span className="shortcut-pill">3</span>
+                  <span className="grade-icon">👍</span>
+                  <span className="grade-title">Acertei</span>
+                  <span className="grade-subtitle">{sm2Intervals.good}</span>
+                </button>
+
+                {/* 4. Fácil / Easy */}
+                <button
+                  onClick={() => handleGrade(4)}
+                  className="simpler-grade-card grade-easy"
+                  title="Fácil - Dominado sem hesitar"
+                >
+                  <span className="shortcut-pill">4</span>
+                  <span className="grade-icon">⚡</span>
+                  <span className="grade-title">Dominado</span>
+                  <span className="grade-subtitle">{sm2Intervals.easy}</span>
+                </button>
+              </div>
             </div>
-
-            <div className="simpler-grade-grid">
-              {/* 1. Errei / Again */}
-              <button
-                onClick={() => handleGrade(1)}
-                className="simpler-grade-card grade-again"
-                title="Errei - Revisar novamente em breve"
-              >
-                <span className="shortcut-pill">1</span>
-                <span className="grade-icon">❌</span>
-                <span className="grade-title">Errei</span>
-                <span className="grade-subtitle">{sm2Intervals.again}</span>
-              </button>
-
-              {/* 2. Difícil / Hard */}
-              <button
-                onClick={() => handleGrade(2)}
-                className="simpler-grade-card grade-hard"
-                title="Difícil - Lembrou com esforço"
-              >
-                <span className="shortcut-pill">2</span>
-                <span className="grade-icon">😓</span>
-                <span className="grade-title">Difícil</span>
-                <span className="grade-subtitle">{sm2Intervals.hard}</span>
-              </button>
-
-              {/* 3. Bom / Good */}
-              <button
-                onClick={() => handleGrade(3)}
-                className="simpler-grade-card grade-good"
-                title="Bom - Lembrou corretamente"
-              >
-                <span className="shortcut-pill">3</span>
-                <span className="grade-icon">👍</span>
-                <span className="grade-title">Acertei</span>
-                <span className="grade-subtitle">{sm2Intervals.good}</span>
-              </button>
-
-              {/* 4. Fácil / Easy */}
-              <button
-                onClick={() => handleGrade(4)}
-                className="simpler-grade-card grade-easy"
-                title="Fácil - Dominado sem hesitar"
-              >
-                <span className="shortcut-pill">4</span>
-                <span className="grade-icon">⚡</span>
-                <span className="grade-title">Dominado</span>
-                <span className="grade-subtitle">{sm2Intervals.easy}</span>
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* KEYBOARD SHORTCUTS HINT RIBBON */}
           <div className="keyboard-shortcuts-ribbon">
-            <span><span className="kbd-badge">Espaço</span> Virar</span>
-            <span><span className="kbd-badge">1</span> Errei</span>
-            <span><span className="kbd-badge">2</span> Difícil</span>
-            <span><span className="kbd-badge">3</span> Acertei</span>
-            <span><span className="kbd-badge">4</span> Dominado</span>
-            <span><span className="kbd-badge">R</span> Áudio</span>
+            {studyMethod === 'CHOICE' ? (
+              <>
+                <span><span className="kbd-badge">1 - 4</span> Escolher Opção</span>
+                <span><span className="kbd-badge">Espaço / Enter</span> Continuar</span>
+                <span><span className="kbd-badge">R</span> Áudio</span>
+              </>
+            ) : studyMethod === 'FLASHCARD' ? (
+              <>
+                <span><span className="kbd-badge">Espaço</span> Virar</span>
+                <span><span className="kbd-badge">1 - 4</span> Avaliar</span>
+                <span><span className="kbd-badge">R</span> Áudio</span>
+              </>
+            ) : (
+              <>
+                <span><span className="kbd-badge">Enter</span> Confirmar</span>
+                <span><span className="kbd-badge">R</span> Áudio</span>
+              </>
+            )}
           </div>
         </div>
       )}
