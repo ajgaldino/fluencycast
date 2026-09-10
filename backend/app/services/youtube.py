@@ -209,72 +209,234 @@ def segment_transcript(raw_items: List[Dict[str, Any]], max_gap_seconds: float =
     return segmented
 
 
+def clean_transcript_token(text: str) -> str:
+    """
+    Cleans HTML entities, tags, speaker markers and sound brackets.
+    """
+    if not text:
+        return ""
+    # Unescape HTML entities (&amp;, &#39;, etc.)
+    text = html.unescape(text)
+    # Remove HTML tags (e.g. <font color="...">, <c.color...>, <v Speaker>)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Remove brackets sound annotations like [music], [Música], (Applause), [Laughter], etc.
+    text = re.sub(
+        r'\[\s*(?:music|música|musica|applause|aplausos|laughter|risos|som|áudio|choro|gritos|silêncio|gasp|sigh|cheering|cough)\s*\]',
+        ' ',
+        text,
+        flags=re.IGNORECASE
+    )
+    text = re.sub(
+        r'\(\s*(?:music|música|musica|applause|aplausos|laughter|risos|som|áudio)\s*\)',
+        ' ',
+        text,
+        flags=re.IGNORECASE
+    )
+    # Remove music symbols
+    text = text.replace('♪', ' ').replace('♫', ' ')
+    # Remove speaker arrows like >> or >>>
+    text = re.sub(r'^(?:>>|>>>|\>)\s*', '', text)
+    # Normalize whitespaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def parse_time_str(ts_str: str) -> float:
+    """
+    Parses '0:12', '00:12', '1:02:15', '01:02:15.500', '00:00:15,200' to seconds.
+    """
+    ts_str = ts_str.replace(',', '.')
+    parts = ts_str.split(':')
+    try:
+        if len(parts) == 3:
+            h = float(parts[0])
+            m = float(parts[1])
+            s = float(parts[2])
+            return h * 3600 + m * 60 + s
+        elif len(parts) == 2:
+            m = float(parts[0])
+            s = float(parts[1])
+            return m * 60 + s
+        elif len(parts) == 1:
+            return float(parts[0])
+    except Exception:
+        pass
+    return 0.0
+
+
 def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
     """
-    Parses manually pasted transcript text into structured segments:
-    - Supports timestamped lines like '0:12 Some sentence' or '0:12\nSome sentence'
-    - Supports plain text (lyrics / sentences without timestamps)
+    Universal YouTube transcript parser supporting virtually any pasted format:
+    1. Brazilian pt-BR concatenated: '0:088 segundosHello everyone' / '1:051 minuto e 5 segundos...'
+    2. English accessibility concatenated: '0:088 secondsHello everyone'
+    3. Standard multiline YouTube copy: '0:08\\nHello everyone'
+    4. Inline standard copy: '0:08 Hello everyone' or '[0:08] - Hello everyone'
+    5. SRT format: '00:00:08,000 --> 00:00:12,000'
+    6. WebVTT format: '00:08.000 --> 00:12.000'
+    7. Timestamps at end of lines: 'Hello everyone (0:08)'
+    8. Plain lyrics/text without timestamps
     """
     if not text or not text.strip():
         return []
 
-    lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
-    segments = []
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
 
-    has_timestamps = any(re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', line) for line in lines)
+    # 1. Check for SRT / WebVTT arrow format
+    arrow_re = re.compile(r'((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?)\s*-->\s*((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?)')
+    srt_matches = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m_arrow = arrow_re.search(line)
+        if m_arrow:
+            start_s = parse_time_str(m_arrow.group(1))
+            end_s = parse_time_str(m_arrow.group(2))
+            text_lines = []
+            i += 1
+            while i < len(lines) and not arrow_re.search(lines[i]) and not (lines[i].isdigit() and len(lines[i]) <= 4):
+                cleaned = clean_transcript_token(lines[i])
+                if cleaned:
+                    text_lines.append(cleaned)
+                i += 1
+            if text_lines:
+                srt_matches.append({
+                    'start_time': round(start_s, 2),
+                    'end_time': round(max(end_s, start_s + 1.2), 2),
+                    'text': ' '.join(text_lines)
+                })
+            continue
+        i += 1
 
-    if has_timestamps:
-        curr_time = None
-        curr_text = []
+    if srt_matches:
+        for idx, s in enumerate(srt_matches):
+            s['sequence'] = idx + 1
+        return srt_matches
 
+    # 2. General parsing: Match timestamps at beginning or end
+    # Handles: '0:08', '[0:08]', '(0:08)', '0:088 segundosHello', '0:08 - Hello'
+    ts_start_re = re.compile(
+        r'^(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2}(?:[.,]\d+)?)(?:\]|\))?'
+        r'(?:'
+        r'\d*\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|m|s)'
+        r'(?:\s*(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?|minutos?|minutes?))?'
+        r')?'
+        r'(?:\s*[-–:]\s*|\s+|$)(.*)$',
+        re.IGNORECASE
+    )
+
+    # Compact start pattern (e.g. 0:011 segundo[music])
+    ts_compact_re = re.compile(
+        r'^(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2})(?:\]|\))?(.*)$'
+    )
+
+    # End timestamp pattern: 'Hello everyone (0:08)'
+    ts_end_re = re.compile(
+        r'^(.*?)(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2})(?:\]|\))?$'
+    )
+
+    accessibility_label_re = re.compile(
+        r'^\d*\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?)(?:\s*(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?))?\s*',
+        re.IGNORECASE
+    )
+
+    raw_entries = []  # tuples: (start_time, text_chunk)
+    curr_time = None
+    curr_text = []
+
+    for line in lines:
+        if line.lower() in ['webvtt', 'kind: captions', 'language: en', 'transcrição', 'transcript']:
+            continue
+        if line.isdigit() and len(line) <= 4:
+            continue
+
+        # Try timestamp at start
+        m_start = ts_start_re.match(line) or ts_compact_re.match(line)
+        if m_start:
+            if curr_time is not None and curr_text:
+                joined = clean_transcript_token(' '.join(curr_text))
+                if joined:
+                    raw_entries.append((curr_time, joined))
+                curr_text = []
+
+            curr_time = parse_time_str(m_start.group(1))
+            rest = m_start.group(2) if len(m_start.groups()) >= 2 else ""
+            rest = accessibility_label_re.sub('', rest).strip()
+            rest_clean = clean_transcript_token(rest)
+            if rest_clean:
+                curr_text.append(rest_clean)
+            continue
+
+        # Try timestamp at end (e.g. 'Hello everyone (0:08)')
+        m_end = ts_end_re.match(line)
+        if m_end and len(m_end.group(1).strip()) > 2:
+            if curr_time is not None and curr_text:
+                joined = clean_transcript_token(' '.join(curr_text))
+                if joined:
+                    raw_entries.append((curr_time, joined))
+                curr_text = []
+
+            curr_time = parse_time_str(m_end.group(2))
+            rest_clean = clean_transcript_token(m_end.group(1))
+            if rest_clean:
+                raw_entries.append((curr_time, rest_clean))
+                curr_time = None
+            continue
+
+        # Continuation line
+        clean_line = accessibility_label_re.sub('', line).strip()
+        clean_line = clean_transcript_token(clean_line)
+        if clean_line:
+            curr_text.append(clean_line)
+
+    if curr_time is not None and curr_text:
+        joined = clean_transcript_token(' '.join(curr_text))
+        if joined:
+            raw_entries.append((curr_time, joined))
+
+    # 3. If no timestamps detected, fallback to plain text line-by-line
+    if not raw_entries:
+        segments = []
+        curr_t = 0.0
         for line in lines:
-            # Inline: 0:15 text or 1:02:15 text
-            m_inline = re.match(r'^(?:(?:(\d{1,2}):)?(\d{1,2}):(\d{2}))\s+(.+)$', line)
-            # Standalone: 0:15 or 1:02:15
-            m_alone = re.match(r'^(?:(?:(\d{1,2}):)?(\d{1,2}):(\d{2}))$', line)
-
-            if m_inline:
-                if curr_time is not None and curr_text:
-                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
-                    curr_text = []
-                h = int(m_inline.group(1) or 0)
-                m_ = int(m_inline.group(2))
-                s = int(m_inline.group(3))
-                curr_time = h * 3600 + m_ * 60 + s
-                curr_text = [m_inline.group(4)]
-            elif m_alone:
-                if curr_time is not None and curr_text:
-                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
-                    curr_text = []
-                h = int(m_alone.group(1) or 0)
-                m_ = int(m_alone.group(2))
-                s = int(m_alone.group(3))
-                curr_time = h * 3600 + m_ * 60 + s
-            else:
-                if curr_time is not None:
-                    curr_text.append(line)
-
-        if curr_time is not None and curr_text:
-            segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
-
-        for i in range(len(segments)):
-            end = segments[i + 1]['start'] if i + 1 < len(segments) else segments[i]['start'] + 4.0
-            segments[i]['end'] = round(max(end, segments[i]['start'] + 1.0), 2)
-            segments[i]['sequence'] = i + 1
-            segments[i]['start_time'] = float(segments[i]['start'])
-            segments[i]['end_time'] = float(segments[i]['end'])
-    else:
-        # Plain text without timestamps
-        start = 0.0
-        for i, line in enumerate(lines):
-            dur = max(2.5, len(line.split()) * 0.45)
+            c = clean_transcript_token(line)
+            if not c:
+                continue
+            dur = max(2.5, len(c.split()) * 0.45)
             segments.append({
-                'sequence': i + 1,
-                'start_time': round(start, 2),
-                'end_time': round(start + dur, 2),
-                'text': line
+                'sequence': len(segments) + 1,
+                'start_time': round(curr_t, 2),
+                'end_time': round(curr_t + dur, 2),
+                'text': c
             })
-            start += dur
+            curr_t += dur
+        return segments
+
+    # 4. Assemble synchronized segments
+    segments = []
+    for idx, (start_t, txt) in enumerate(raw_entries):
+        words = len(txt.split())
+        est_dur = max(2.2, words * 0.42)
+
+        if idx + 1 < len(raw_entries):
+            next_start = raw_entries[idx + 1][0]
+            if next_start > start_t:
+                # If gap is normal (< 15s), end_time is next_start
+                # If gap is huge (video jump), cap duration
+                end_t = min(next_start, start_t + max(est_dur, 10.0))
+            else:
+                end_t = start_t + est_dur
+        else:
+            end_t = start_t + est_dur
+
+        end_t = max(end_t, start_t + 1.2)
+
+        segments.append({
+            'sequence': len(segments) + 1,
+            'start_time': round(start_t, 2),
+            'end_time': round(end_t, 2),
+            'text': txt
+        })
 
     return segments
 

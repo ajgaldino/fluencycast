@@ -42,3 +42,53 @@ def test_create_video_invalid_url(client):
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 400
+
+
+def test_parse_transcript_text_user_brazilian_format():
+    from app.services.youtube import parse_transcript_text
+
+    user_raw = """0:011 segundo[music]
+0:055 segundos[music]
+0:088 segundosHello everyone and welcome back to Mr.
+0:1212 segundosEnglish [music] channel where learning English is easy and fun. I'm Emily.
+0:1818 segundosHello Emily. Hi everyone. [music] I'm Paul and I am so ready for today's chat.
+0:2424 segundosMe too Paul. Today we are talking about something we do every single day."""
+
+    segments = parse_transcript_text(user_raw)
+    assert len(segments) == 4
+
+    assert segments[0]["start_time"] == 8.0
+    assert segments[0]["end_time"] == 12.0
+    assert segments[0]["text"] == "Hello everyone and welcome back to Mr."
+
+    assert segments[1]["start_time"] == 12.0
+    assert segments[1]["end_time"] == 18.0
+    assert "[music]" not in segments[1]["text"]
+    assert "English channel where learning English is easy and fun. I'm Emily." in segments[1]["text"]
+
+    assert segments[2]["start_time"] == 18.0
+    assert segments[2]["end_time"] == 24.0
+
+    assert segments[3]["start_time"] == 24.0
+    assert segments[3]["end_time"] >= 26.0
+
+
+def test_parse_transcript_text_srt_and_vtt():
+    from app.services.youtube import parse_transcript_text
+
+    srt_sample = """1
+00:00:05,000 --> 00:00:09,500
+Hello and welcome.
+
+2
+00:00:10,000 --> 00:00:15,000
+Second subtitle line."""
+
+    segments = parse_transcript_text(srt_sample)
+    assert len(segments) == 2
+    assert segments[0]["start_time"] == 5.0
+    assert segments[0]["end_time"] == 9.5
+    assert segments[0]["text"] == "Hello and welcome."
+    assert segments[1]["start_time"] == 10.0
+    assert segments[1]["end_time"] == 15.0
+
