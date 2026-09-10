@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
-import { Flame, BookOpen, PlayCircle, PlusCircle, ArrowRight, BrainCircuit, CheckCircle2 } from 'lucide-react';
+import { Flame, BookOpen, PlayCircle, PlusCircle, ArrowRight, BrainCircuit, CheckCircle2, RotateCcw } from 'lucide-react';
 import { reviewService } from '../../services/reviews';
 import { videoService } from '../../services/videos';
+import { authService } from '../../services/auth';
 import { ReviewSummary } from '../../types/phrase';
 import { Video } from '../../types/video';
 
@@ -19,6 +20,7 @@ export const Dashboard: React.FC = () => {
   });
   const [recentVideos, setRecentVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
 
   const dailyGoal = 15; // Daily cards review goal
 
@@ -44,6 +46,24 @@ export const Dashboard: React.FC = () => {
     loadDashboardData();
   }, [user]);
 
+  const handleResetData = async () => {
+    const ok = window.confirm(
+      '⚠️ ATENÇÃO: Deseja apagar todos os vídeos, transcrições e frases salvas para recomeçar o aplicativo do zero?\n\nEsta ação limpará todo o seu histórico.'
+    );
+    if (!ok) return;
+
+    try {
+      setResetting(true);
+      await authService.resetData();
+      alert('✅ Banco limpo com sucesso! Você está começando do zero.');
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message || 'Falha ao resetar dados.');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const firstName = user?.full_name ? user.full_name.split(' ')[0] : 'Estudante';
   const lastVideo = recentVideos[0];
   const goalProgress = Math.min(100, Math.round(((summary.reviewed_today_count || 0) / dailyGoal) * 100));
@@ -51,17 +71,30 @@ export const Dashboard: React.FC = () => {
   return (
     <div>
       {/* Welcome Banner */}
-      <div style={{ marginBottom: '1.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem' }}>
-          <h1 style={{ fontSize: '1.75rem' }}>Good day, {firstName}</h1>
-          <div className="badge badge-amber">
-            <Flame size={14} />
-            <span>{summary.streak_days} dias seguidos</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem' }}>
+            <h1 style={{ fontSize: '1.75rem' }}>Good day, {firstName}</h1>
+            <div className="badge badge-amber">
+              <Flame size={14} />
+              <span>{summary.streak_days} dias seguidos</span>
+            </div>
           </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+            Pronto para expandir seu vocabulário e compreensão hoje?
+          </p>
         </div>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-          Pronto para expandir seu vocabulário e compreensão hoje?
-        </p>
+
+        <button
+          onClick={handleResetData}
+          disabled={resetting}
+          className="btn btn-secondary"
+          style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}
+          title="Apagar todos os vídeos e frases para começar do zero"
+        >
+          <RotateCcw size={13} />
+          <span>{resetting ? 'Limpando...' : 'Recomeçar do Zero'}</span>
+        </button>
       </div>
 
       {/* Review Call-to-Action Card with Daily Goal Tracker */}

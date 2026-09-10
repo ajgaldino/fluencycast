@@ -22,6 +22,12 @@ export const authService = {
     return request<User>('/auth/me');
   },
 
+  async resetData(): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/reset-data', {
+      method: 'POST',
+    });
+  },
+
   logout(): void {
     localStorage.removeItem('fluency_token');
   },

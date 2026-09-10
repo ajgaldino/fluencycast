@@ -116,3 +116,47 @@ def recover_password(
     Password Recovery stub.
     """
     return {"message": "Password recovery email sent if the account exists."}
+
+
+@router.post("/reset-data")
+def reset_user_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Deletes all videos, transcript segments, saved phrases, reviews,
+    and study sessions for the authenticated user, resetting account to a clean slate.
+    """
+    from app.models.phrase import SavedPhrase, PhraseReview
+    from app.models.video import Video, TranscriptSegment
+    from app.models.study_session import StudySession
+
+    # Delete reviews
+    db.query(PhraseReview).filter(
+        PhraseReview.saved_phrase_id.in_(
+            db.query(SavedPhrase.id).filter(SavedPhrase.user_id == current_user.id)
+        )
+    ).delete(synchronize_session=False)
+
+    # Delete saved phrases
+    db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id).delete(synchronize_session=False)
+
+    # Delete segments and videos
+    db.query(TranscriptSegment).filter(
+        TranscriptSegment.video_id.in_(
+            db.query(Video.id).filter(Video.user_id == current_user.id)
+        )
+    ).delete(synchronize_session=False)
+    db.query(Video).filter(Video.user_id == current_user.id).delete(synchronize_session=False)
+
+    # Delete study sessions
+    db.query(StudySession).filter(StudySession.user_id == current_user.id).delete(synchronize_session=False)
+
+    # Reset profile stats
+    if current_user.profile:
+        current_user.profile.current_streak = 0
+        current_user.profile.last_study_date = None
+
+    db.commit()
+    return {"message": "Todos os dados foram resetados do zero com sucesso."}
+
