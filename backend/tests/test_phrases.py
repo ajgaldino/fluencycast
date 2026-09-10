@@ -178,3 +178,51 @@ def test_extract_keywords_no_duplicates_across_videos(db_session):
     assert "challenge" in v2_card_texts
     assert "destiny" in v2_card_texts
 
+
+def test_auto_repair_untranslated_phrases(client, db_session):
+    from app.services.vocabulary import auto_repair_untranslated_phrases
+    from app.models.user import User
+    from app.models.phrase import SavedPhrase
+
+    # Get or create user
+    headers = get_auth_headers(client, email="repair_user@fluencycast.com")
+    user = db_session.query(User).filter(User.email == "repair_user@fluencycast.com").first()
+
+    # Create phrases with broken translations (untranslated word identical to text)
+    p1 = SavedPhrase(
+        user_id=user.id,
+        text="quick",
+        translation="quick",
+        phrase_type="WORD",
+        status="NEW"
+    )
+    p2 = SavedPhrase(
+        user_id=user.id,
+        text="small",
+        translation="Sem tradução cadastrada",
+        phrase_type="WORD",
+        status="NEW"
+    )
+    p3 = SavedPhrase(
+        user_id=user.id,
+        text="safe",
+        translation="",
+        phrase_type="WORD",
+        status="NEW"
+    )
+    db_session.add_all([p1, p2, p3])
+    db_session.commit()
+
+    # Run auto-repair
+    repaired = auto_repair_untranslated_phrases(user.id, db_session)
+    assert repaired >= 3
+
+    db_session.refresh(p1)
+    db_session.refresh(p2)
+    db_session.refresh(p3)
+
+    assert p1.translation != "quick"
+    assert "rápido" in p1.translation
+    assert "pequeno" in p2.translation
+    assert "seguro" in p3.translation
+

@@ -13,9 +13,10 @@ from app.schemas.review import ReviewSubmitRequest, ReviewResponse, DailyReviewS
 
 router = APIRouter()
 
-
+import re
 from sqlalchemy import func
-from app.services.vocabulary import get_video_filter_condition
+from app.services.vocabulary import get_video_filter_condition, auto_repair_untranslated_phrases
+from app.api.v1.endpoints.ai import CORE_DICTIONARY, translate_text, TranslateRequest
 
 @router.get("/summary", response_model=DailyReviewSummary)
 def get_review_summary(
@@ -103,18 +104,51 @@ def get_today_reviews(
         else:
             query = query.filter(func.upper(SavedPhrase.phrase_type) == p_type)
 
+    # Auto-repair any untranslated cards in the user's library
+    try:
+        auto_repair_untranslated_phrases(current_user.id, db, limit=50)
+    except Exception:
+        pass
+
     phrases = query.order_by(SavedPhrase.next_review_at.asc()).all()
 
-    # Deduplicate repeated words within the review session
+    # Deduplicate repeated words within the review session and ensure translation is present
     seen_words = set()
     deduped = []
+    has_fixes = False
+
     for p in phrases:
         key = p.text.strip().lower() if (p.phrase_type or "").upper() == "WORD" else p.id
         if key not in seen_words:
             seen_words.add(key)
+
+            # Safeguard: if translation equals text or is empty, repair immediately
+            t_clean = (p.translation or "").strip().lower()
+            txt_clean = (p.text or "").strip().lower()
+            if not t_clean or t_clean == txt_clean or t_clean == "sem tradução cadastrada":
+                clean_w = re.sub(r'[^a-zA-Z]', '', txt_clean)
+                new_t = ""
+                if clean_w in CORE_DICTIONARY:
+                    new_t = CORE_DICTIONARY[clean_w]["translation"].split(",")[0].strip()
+                elif clean_w.endswith('s') and len(clean_w) > 3 and clean_w[:-1] in CORE_DICTIONARY:
+                    new_t = CORE_DICTIONARY[clean_w[:-1]]["translation"].split(",")[0].strip()
+                elif clean_w.endswith('es') and len(clean_w) > 4 and clean_w[:-2] in CORE_DICTIONARY:
+                    new_t = CORE_DICTIONARY[clean_w[:-2]]["translation"].split(",")[0].strip()
+                else:
+                    new_t = "Expressão em estudo"
+                p.translation = new_t
+                has_fixes = True
+
             deduped.append(p)
         if len(deduped) >= limit:
             break
+
+    if has_fixes:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
     return deduped
 
 

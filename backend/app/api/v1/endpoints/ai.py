@@ -137,6 +137,138 @@ CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
     "away": {"translation": "longe, embora", "pos": "advérbio", "tip": "'Go away' = Vá embora. 'Far away' = Longe. 'Right away' = Imediatamente."},
     "right": {"translation": "certo, correto, direito", "pos": "adjetivo", "tip": "'You're right' = Você tem razão. 'Right now' = Agora mesmo. 'All right' = Tudo bem."},
     "wrong": {"translation": "errado, incorreto", "pos": "adjetivo", "tip": "'What's wrong?' = O que houve? / Qual o problema? 'You're wrong' = Você está errado."},
+    # Expanded conversational core words
+    "quick": {"translation": "rápido, veloz, ágil", "pos": "adjetivo", "tip": "'A quick question' = Uma pergunta rápida. 'Quick thinking' = Raciocínio rápido."},
+    "quickly": {"translation": "rapidamente, depressa", "pos": "advérbio", "tip": "'Come quickly!' = Venha depressa!"},
+    "small": {"translation": "pequeno, curto", "pos": "adjetivo", "tip": "'Small talk' = Conversa fiada / bate-papo informal. 'A small problem' = Um probleminha."},
+    "safe": {"translation": "seguro, protegido, tranquilo", "pos": "adjetivo", "tip": "'Safe topics' = Assuntos seguros. 'Stay safe' = Fique seguro / se cuide."},
+    "safely": {"translation": "com segurança", "pos": "advérbio", "tip": "'Drive safely' = Dirija com segurança."},
+    "safety": {"translation": "segurança, proteção", "pos": "substantivo", "tip": "'Safety first' = Segurança em primeiro lugar."},
+    "taboo": {"translation": "tabu, assunto proibido", "pos": "substantivo / adjetivo", "tip": "'Taboo topics' = Temas proibidos ou delicados em conversas."},
+    "stranger": {"translation": "estranho, desconhecido", "pos": "substantivo", "tip": "'Talking to strangers' = Conversando com desconhecidos."},
+    "strangers": {"translation": "estranhos, desconhecidos", "pos": "substantivo", "tip": "Plural de stranger."},
+    "silence": {"translation": "silêncio", "pos": "substantivo", "tip": "'Awkward silence' = Silêncio constrangedor. 'Fill the silence' = Preencher o silêncio."},
+    "awkward": {"translation": "estranho, constrangedor, desajeitado", "pos": "adjetivo", "tip": "'An awkward moment' = Um momento constrangedor."},
+    "bridge": {"translation": "ponte, ligação", "pos": "substantivo", "tip": "'Build a bridge' = Construir uma ponte / criar conexão com alguém."},
+    "traffic": {"translation": "trânsito, tráfego", "pos": "substantivo", "tip": "'Heavy traffic' = Trânsito pesado. Muito comum em small talk."},
+    "elevator": {"translation": "elevador", "pos": "substantivo", "tip": "'In the elevator' = No elevador. Cenário clássico de conversa casual."},
+    "nervous": {"translation": "nervoso, ansioso", "pos": "adjetivo", "tip": "'Feel nervous' = Sentir-se nervoso. Normal ao falar outro idioma!"},
+    "weather": {"translation": "clima, tempo", "pos": "substantivo", "tip": "'Nice weather today!' = Tempo bom hoje! O assunto número 1 de small talk."},
+    "chat": {"translation": "conversa, bater papo", "pos": "verbo / substantivo", "tip": "'Have a quick chat' = Ter uma conversa rápida."},
+    "store": {"translation": "loja, guardar", "pos": "substantivo / verbo", "tip": "'At the grocery store' = No supermercado."},
+    "grocery": {"translation": "mercearia, compras de comida", "pos": "substantivo", "tip": "'Grocery shopping' = Fazer compras de supermercado."},
+    "debate": {"translation": "debate, discussão", "pos": "substantivo / verbo", "tip": "'Deep debate' = Debate profundo."},
+    "friendly": {"translation": "amigável, simpático", "pos": "adjetivo", "tip": "'Friendly smile' = Sorriso simpático. 'Be friendly' = Seja amigável."},
+    "fill": {"translation": "preencher, encher", "pos": "verbo", "tip": "'Fill the silence' = Preencher o silêncio."},
+    "connect": {"translation": "conectar, ligar, aproximar", "pos": "verbo", "tip": "'Connect with people' = Se conectar com as pessoas."},
+    "honest": {"translation": "honesto, sincero", "pos": "adjetivo", "tip": "'To be honest' = Para ser sincero."},
+    "honestly": {"translation": "sinceramente, honestamente", "pos": "advérbio", "tip": "'Honestly, I don't know' = Sinceramente, eu não sei."},
+    "native": {"translation": "nativo, natural", "pos": "adjetivo / substantivo", "tip": "'Native speaker' = Falante nativo."},
+    "basically": {"translation": "basicamente", "pos": "advérbio", "tip": "'Basically, it works like this' = Basicamente, funciona assim."},
+    "casual": {"translation": "casual, informal, descontraído", "pos": "adjetivo", "tip": "'Casual conversation' = Conversa informal."},
+    "light": {"translation": "leve, luz, claro", "pos": "adjetivo / substantivo", "tip": "'Light topics' = Assuntos leves."},
+    "deep": {"translation": "profundo, intenso", "pos": "adjetivo", "tip": "'Deep conversation' = Conversa profunda."},
+    "philosophical": {"translation": "filosófico", "pos": "adjetivo", "tip": "'Philosophical debate' = Debate filosófico."},
+    "huge": {"translation": "enorme, gigantesco", "pos": "adjetivo", "tip": "'A huge difference' = Uma enorme diferença."},
+    "vocabulary": {"translation": "vocabulário", "pos": "substantivo", "tip": "'Expand vocabulary' = Expandir o vocabulário."},
+    "practice": {"translation": "praticar, treino, prática", "pos": "verbo / substantivo", "tip": "'Practice makes perfect' = A prática leva à perfeição."},
+    "speaking": {"translation": "fala, conversação", "pos": "substantivo", "tip": "'Speaking skills' = Habilidades de fala."},
+    "perfect": {"translation": "perfeito, ideal", "pos": "adjetivo", "tip": "'Perfect place' = Lugar perfeito."},
+    "place": {"translation": "lugar, colocar", "pos": "substantivo / verbo", "tip": "'In the first place' = Em primeiro lugar."},
+    "short": {"translation": "curto, breve, baixo", "pos": "adjetivo", "tip": "'Short conversations' = Conversas curtas."},
+    "topic": {"translation": "assunto, tópico, tema", "pos": "substantivo", "tip": "'Today's topic' = O tema de hoje."},
+    "topics": {"translation": "assuntos, tópicos, temas", "pos": "substantivo", "tip": "Plural de topic."},
+    "conversation": {"translation": "conversa, diálogo", "pos": "substantivo", "tip": "'Start a conversation' = Iniciar uma conversa."},
+    "conversations": {"translation": "conversas, diálogos", "pos": "substantivo", "tip": "Plural de conversation."},
+    "channel": {"translation": "canal", "pos": "substantivo", "tip": "'YouTube channel' = Canal no YouTube."},
+    "simple": {"translation": "simples, descomplicado", "pos": "adjetivo", "tip": "'Keep it simple' = Mantenha simples."},
+    "funny": {"translation": "engraçado, divertido", "pos": "adjetivo", "tip": "'That's so funny!' = Isso é muito engraçado!"},
+    "laugh": {"translation": "rir, risada", "pos": "verbo / substantivo", "tip": "'Make me laugh' = Me fazer rir."},
+    "smile": {"translation": "sorrir, sorriso", "pos": "verbo / substantivo", "tip": "'Keep smiling' = Continue sorrindo."},
+    "happy": {"translation": "feliz, contente", "pos": "adjetivo", "tip": "'Happy to help' = Feliz em ajudar."},
+    "tired": {"translation": "cansado, farto", "pos": "adjetivo", "tip": "'I'm so tired' = Estou tão cansado(a)."},
+    "busy": {"translation": "ocupado, agitado", "pos": "adjetivo", "tip": "'Busy day' = Dia corrido/ocupado."},
+    "ready": {"translation": "pronto, preparado", "pos": "adjetivo", "tip": "'Are you ready?' = Você está pronto?"},
+    "smart": {"translation": "inteligente, esperto", "pos": "adjetivo", "tip": "'Smart choice' = Escolha inteligente."},
+    "polite": {"translation": "educado, cortês", "pos": "adjetivo", "tip": "'Be polite' = Seja educado."},
+    "advice": {"translation": "conselho, orientação", "pos": "substantivo", "tip": "'Good advice' = Bom conselho."},
+    "secret": {"translation": "segredo, secreto", "pos": "substantivo / adjetivo", "tip": "'Keep a secret' = Guardar segredo."},
+    "politics": {"translation": "política", "pos": "substantivo", "tip": "'Avoid politics in small talk' = Evite política em conversas casuais."},
+    "religion": {"translation": "religião", "pos": "substantivo", "tip": "'Sensitive topic' = Tema sensível."},
+    "money": {"translation": "dinheiro", "pos": "substantivo", "tip": "'Save money' = Economizar dinheiro."},
+    "salary": {"translation": "salário", "pos": "substantivo", "tip": "'Monthly salary' = Salário mensal."},
+    "job": {"translation": "trabalho, emprego", "pos": "substantivo", "tip": "'Good job!' = Bom trabalho!"},
+    "boss": {"translation": "chefe, patrão", "pos": "substantivo", "tip": "'Talk to the boss' = Falar com o chefe."},
+    "vacation": {"translation": "férias", "pos": "substantivo", "tip": "'On vacation' = De férias. Ótimo assunto de conversa!"},
+    "holiday": {"translation": "feriado, folga", "pos": "substantivo", "tip": "'Public holiday' = Feriado público."},
+    "weekend": {"translation": "fim de semana", "pos": "substantivo", "tip": "'Have a great weekend!' = Tenha um ótimo fim de semana!"},
+    "morning": {"translation": "manhã", "pos": "substantivo", "tip": "'Good morning!' = Bom dia!"},
+    "afternoon": {"translation": "tarde", "pos": "substantivo", "tip": "'Good afternoon!' = Boa tarde!"},
+    "night": {"translation": "noite", "pos": "substantivo", "tip": "'Good night!' = Boa noite!"},
+    "fast": {"translation": "rápido, veloz", "pos": "adjetivo / advérbio", "tip": "'Fast food' / 'Hold on fast'."},
+    "slow": {"translation": "lento, devagar", "pos": "adjetivo / advérbio", "tip": "'Slow down' = Diminua o ritmo."},
+    "loud": {"translation": "alto, barulhento", "pos": "adjetivo", "tip": "'Too loud' = Alto demais."},
+    "quiet": {"translation": "quieto, silencioso, calmo", "pos": "adjetivo", "tip": "'Be quiet' = Fique quieto."},
+    "calm": {"translation": "calmo, tranquilo", "pos": "adjetivo", "tip": "'Stay calm' = Fique calmo."},
+    "cool": {"translation": "legal, fresco, descolado", "pos": "adjetivo", "tip": "'That's cool!' = Que legal!"},
+    "warm": {"translation": "morno, caloroso, acolhedor", "pos": "adjetivo", "tip": "'Warm welcome' = Boas-vindas calorosas."},
+    "cold": {"translation": "frio, resfriado", "pos": "adjetivo / substantivo", "tip": "'It's cold outside' = Está frio lá fora."},
+    "hot": {"translation": "quente, apimentado", "pos": "adjetivo", "tip": "'Hot coffee' = Café quente."},
+    "rain": {"translation": "chuva, chover", "pos": "substantivo / verbo", "tip": "'It's raining' = Está chovendo."},
+    "sunny": {"translation": "ensolarado", "pos": "adjetivo", "tip": "'Sunny day' = Dia de sol."},
+    "cloudy": {"translation": "nublado", "pos": "adjetivo", "tip": "'Cloudy sky' = Céu nublado."},
+    "compliment": {"translation": "elogio, elogiar", "pos": "substantivo / verbo", "tip": "'Give a compliment' = Fazer um elogio."},
+    "compliments": {"translation": "elogios", "pos": "substantivo", "tip": "Plural de compliment."},
+    "common": {"translation": "comum, frequente", "pos": "adjetivo", "tip": "'Common sense' = Bom senso."},
+    "popular": {"translation": "popular, famoso", "pos": "adjetivo", "tip": "'Very popular' = Muito conhecido."},
+    "interesting": {"translation": "interessante", "pos": "adjetivo", "tip": "'Sounds interesting!' = Parece interessante!"},
+    "boring": {"translation": "chato, entediante", "pos": "adjetivo", "tip": "'Not boring at all' = Nem um pouco chato."},
+    "fun": {"translation": "divertido, diversão", "pos": "adjetivo / substantivo", "tip": "'Have fun!' = Divirta-se!"},
+    "break": {"translation": "pausa, intervalo, quebrar", "pos": "substantivo / verbo", "tip": "'Take a break' = Fazer uma pausa."},
+    "finish": {"translation": "terminar, concluir", "pos": "verbo", "tip": "'Finish line' = Linha de chegada."},
+    "learn": {"translation": "aprender", "pos": "verbo", "tip": "'Learn English' = Aprender inglês."},
+    "teach": {"translation": "ensinar", "pos": "verbo", "tip": "'Teach someone' = Ensinar alguém."},
+    "study": {"translation": "estudar, estudo", "pos": "verbo / substantivo", "tip": "'Study hard' = Estude com afinco."},
+    "remember": {"translation": "lembrar, recordar", "pos": "verbo", "tip": "'Remember that' = Lembre-se disso."},
+    "forget": {"translation": "esquecer", "pos": "verbo", "tip": "'Don't forget' = Não esqueça."},
+    "choose": {"translation": "escolher", "pos": "verbo", "tip": "'Choose wisely' = Escolha com sabedoria."},
+    "decide": {"translation": "decidir", "pos": "verbo", "tip": "'You decide' = Você decide."},
+    "hope": {"translation": "esperar, torcer, esperança", "pos": "verbo / substantivo", "tip": "'I hope so' = Espero que sim."},
+    "wish": {"translation": "desejar, vontade, desejo", "pos": "verbo / substantivo", "tip": "'Make a wish' = Faça um pedido."},
+    "believe": {"translation": "acreditar, crer", "pos": "verbo", "tip": "'Believe in yourself' = Acredite em você."},
+    "share": {"translation": "compartilhar, dividir", "pos": "verbo", "tip": "'Share your thoughts' = Compartilhe seus pensamentos."},
+    "care": {"translation": "importar-se, cuidar", "pos": "verbo / substantivo", "tip": "'Take care' = Cuide-se."},
+    "worry": {"translation": "preocupar-se", "pos": "verbo", "tip": "'Don't worry' = Não se preocupe."},
+    "enjoy": {"translation": "aproveitar, curtir", "pos": "verbo", "tip": "'Enjoy your meal' = Bom apetite / aproveite."},
+    "hate": {"translation": "odiar", "pos": "verbo", "tip": "'I hate traffic' = Odeio trânsito."},
+    "love": {"translation": "amar, adorar, amor", "pos": "verbo / substantivo", "tip": "'I'd love to' = Adoraria."},
+    "like": {"translation": "gostar de, como", "pos": "verbo / preposição", "tip": "'I like that' = Gostei disso."},
+    "mistake": {"translation": "erro, engano", "pos": "substantivo", "tip": "'Make a mistake' = Cometer um erro."},
+    "feeling": {"translation": "sentimento, sensação", "pos": "substantivo", "tip": "'Good feeling' = Sensação boa."},
+    "opinion": {"translation": "opinião", "pos": "substantivo", "tip": "'In my opinion' = Na minha opinião."},
+    "truth": {"translation": "verdade", "pos": "substantivo", "tip": "'Tell the truth' = Falar a verdade."},
+    "world": {"translation": "mundo", "pos": "substantivo", "tip": "'All over the world' = Pelo mundo todo."},
+    "city": {"translation": "cidade", "pos": "substantivo", "tip": "'Big city' = Cidade grande."},
+    "food": {"translation": "comida, alimento", "pos": "substantivo", "tip": "'Delicious food' = Comida deliciosa."},
+    "water": {"translation": "água", "pos": "substantivo", "tip": "'Drink water' = Beber água."},
+    "drink": {"translation": "beber, bebida", "pos": "verbo / substantivo", "tip": "'Have a drink' = Tomar uma bebida."},
+    "eat": {"translation": "comer", "pos": "verbo", "tip": "'Let's eat' = Vamos comer."},
+    "buy": {"translation": "comprar", "pos": "verbo", "tip": "'Buy tickets' = Comprar ingressos."},
+    "cheap": {"translation": "barato, em conta", "pos": "adjetivo", "tip": "'Very cheap' = Muito barato."},
+    "expensive": {"translation": "caro", "pos": "adjetivo", "tip": "'Too expensive' = Caro demais."},
+    "open": {"translation": "abrir, aberto", "pos": "verbo / adjetivo", "tip": "'Open the door' = Abra a porta."},
+    "close": {"translation": "fechar, próximo", "pos": "verbo / adjetivo", "tip": "'Close friends' = Amigos próximos."},
+    "clean": {"translation": "limpar, limpo", "pos": "verbo / adjetivo", "tip": "'Keep it clean' = Mantenha limpo."},
+    "new": {"translation": "novo, recente", "pos": "adjetivo", "tip": "'Brand new' = Novinho em folha."},
+    "old": {"translation": "velho, antigo", "pos": "adjetivo", "tip": "'Old friend' = Amigo antigo."},
+    "big": {"translation": "grande, importante", "pos": "adjetivo", "tip": "'Big news' = Grande notícia."},
+    "chance": {"translation": "chance, oportunidade", "pos": "substantivo", "tip": "'Take a chance' = Arriscar / dar uma chance."},
+    "reason": {"translation": "razão, motivo", "pos": "substantivo", "tip": "'The reason why' = O motivo pelo qual."},
+    "choice": {"translation": "escolha, opção", "pos": "substantivo", "tip": "'Good choice' = Boa escolha."},
+    "goal": {"translation": "meta, objetivo, gol", "pos": "substantivo", "tip": "'Reach your goals' = Atingir suas metas."},
+    "plan": {"translation": "plano, planejar", "pos": "substantivo / verbo", "tip": "'What's the plan?' = Qual é o plano?"},
+    "future": {"translation": "futuro", "pos": "substantivo", "tip": "'In the future' = No futuro."},
+    "moment": {"translation": "momento, instante", "pos": "substantivo", "tip": "'Just a moment' = Só um instante."},
 }
 
 
@@ -154,15 +286,34 @@ def translate_text(
 
     # Check cache first
     cache_key = text.lower()
-    if cache_key in _TRANSLATION_CACHE:
+    if cache_key in _TRANSLATION_CACHE and _TRANSLATION_CACHE[cache_key].strip().lower() != cache_key:
         return TranslateResponse(original=text, translation=_TRANSLATION_CACHE[cache_key])
 
-    # Strategy 0: Instant built-in core dictionary lookup for single clean words
+    # Strategy 0: Instant built-in core dictionary lookup with stem/inflection support
     clean_single = re.sub(r'[^a-zA-Z]', '', text.lower())
-    if " " not in text and clean_single in CORE_DICTIONARY:
-        primary = CORE_DICTIONARY[clean_single]["translation"].split(",")[0].strip()
-        _TRANSLATION_CACHE[cache_key] = primary
-        return TranslateResponse(original=text, translation=primary)
+    if " " not in text:
+        # Exact match
+        if clean_single in CORE_DICTIONARY:
+            primary = CORE_DICTIONARY[clean_single]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = primary
+            return TranslateResponse(original=text, translation=primary)
+        # Suffix matching: plurals or verb inflections
+        if clean_single.endswith('s') and len(clean_single) > 3 and clean_single[:-1] in CORE_DICTIONARY:
+            primary = CORE_DICTIONARY[clean_single[:-1]]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = primary
+            return TranslateResponse(original=text, translation=primary)
+        if clean_single.endswith('es') and len(clean_single) > 4 and clean_single[:-2] in CORE_DICTIONARY:
+            primary = CORE_DICTIONARY[clean_single[:-2]]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = primary
+            return TranslateResponse(original=text, translation=primary)
+        if clean_single.endswith('ing') and len(clean_single) > 4 and clean_single[:-3] in CORE_DICTIONARY:
+            primary = CORE_DICTIONARY[clean_single[:-3]]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = primary
+            return TranslateResponse(original=text, translation=primary)
+        if clean_single.endswith('ed') and len(clean_single) > 4 and clean_single[:-2] in CORE_DICTIONARY:
+            primary = CORE_DICTIONARY[clean_single[:-2]]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = primary
+            return TranslateResponse(original=text, translation=primary)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -183,23 +334,7 @@ def translate_text(
     except Exception as e:
         print(f"Strategy 1 Translation error: {e}")
 
-    # Strategy 2: MyMemory Translation API
-    try:
-        res = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": text, "langpair": "en|pt-BR"},
-            timeout=6
-        )
-        if res.status_code == 200:
-            data = res.json()
-            translated = data.get("responseData", {}).get("translatedText")
-            if translated and translated.strip().lower() != text.lower():
-                _TRANSLATION_CACHE[cache_key] = translated
-                return TranslateResponse(original=text, translation=translated)
-    except Exception as e:
-        print(f"Strategy 2 Translation error: {e}")
-
-    # Strategy 3: Google translate gtx with browser headers
+    # Strategy 2: Google translate gtx with browser headers
     try:
         url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=pt&dt=t&q={urllib.parse.quote(text)}"
         res = requests.get(url, headers=headers, timeout=6)
@@ -211,7 +346,45 @@ def translate_text(
                     _TRANSLATION_CACHE[cache_key] = translated
                     return TranslateResponse(original=text, translation=translated)
     except Exception as e:
+        print(f"Strategy 2 Translation error: {e}")
+
+    # Strategy 3: Google translate webapp client
+    try:
+        url = f"https://translate.googleapis.com/translate_a/single?client=webapp&sl=en&tl=pt&dt=t&q={urllib.parse.quote(text)}"
+        res = requests.get(url, headers=headers, timeout=6)
+        if res.status_code == 200:
+            data = res.json()
+            if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                translated = "".join([part[0] for part in data[0] if part and len(part) > 0 and part[0]])
+                if translated and translated.strip().lower() != text.lower():
+                    _TRANSLATION_CACHE[cache_key] = translated
+                    return TranslateResponse(original=text, translation=translated)
+    except Exception as e:
         print(f"Strategy 3 Translation error: {e}")
+
+    # Strategy 4: MyMemory Translation API
+    try:
+        res = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": text, "langpair": "en|pt-BR"},
+            timeout=6
+        )
+        if res.status_code == 200:
+            data = res.json()
+            translated = data.get("responseData", {}).get("translatedText")
+            if translated and translated.strip().lower() != text.lower() and "MYMEMORY WARNING" not in translated.upper():
+                _TRANSLATION_CACHE[cache_key] = translated
+                return TranslateResponse(original=text, translation=translated)
+    except Exception as e:
+        print(f"Strategy 4 Translation error: {e}")
+
+    # Strategy 5: Lemmatized or individual token fallback for short phrases/words
+    tokens = [re.sub(r'[^a-zA-Z]', '', tok).lower() for tok in text.split()]
+    dict_matches = [CORE_DICTIONARY[t]["translation"].split(",")[0].strip() for t in tokens if t in CORE_DICTIONARY]
+    if dict_matches:
+        fallback_trans = " ".join(dict_matches)
+        _TRANSLATION_CACHE[cache_key] = fallback_trans
+        return TranslateResponse(original=text, translation=fallback_trans)
 
     return TranslateResponse(original=text, translation=text)
 

@@ -1,3 +1,4 @@
+import re
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -12,7 +13,8 @@ from app.schemas.phrase import SavedPhraseCreate, SavedPhraseUpdate, SavedPhrase
 router = APIRouter()
 
 
-from app.services.vocabulary import extract_keywords_for_video, get_video_filter_condition
+from app.services.vocabulary import extract_keywords_for_video, get_video_filter_condition, auto_repair_untranslated_phrases
+from app.api.v1.endpoints.ai import CORE_DICTIONARY
 
 @router.get("/", response_model=List[SavedPhraseResponse])
 def get_saved_phrases(
@@ -28,6 +30,11 @@ def get_saved_phrases(
     Retrieve all saved phrases for the current user.
     Supports filtering by video_id, status and phrase_type (SENTENCE vs WORD).
     """
+    try:
+        auto_repair_untranslated_phrases(current_user.id, db, limit=50)
+    except Exception:
+        pass
+
     query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
     if video_id and video_id.strip() and video_id.upper() != "ALL":
         query = query.filter(get_video_filter_condition(video_id, current_user.id, db))
@@ -59,6 +66,15 @@ def create_saved_phrase(
             detail="O texto da frase ou palavra não pode ser vazio."
         )
 
+    # Clean translation check
+    trans = (phrase_in.translation or "").strip()
+    if not trans or trans.lower() == clean_text.lower() or trans == "Sem tradução cadastrada":
+        clean_w = re.sub(r'[^a-zA-Z]', '', clean_text.lower())
+        if clean_w in CORE_DICTIONARY:
+            trans = CORE_DICTIONARY[clean_w]["translation"].split(",")[0].strip()
+        elif clean_w.endswith('s') and len(clean_w) > 3 and clean_w[:-1] in CORE_DICTIONARY:
+            trans = CORE_DICTIONARY[clean_w[:-1]]["translation"].split(",")[0].strip()
+
     p_type = (phrase_in.phrase_type or "SENTENCE").upper()
 
     # Deduplicate single words across all videos for this user
@@ -71,8 +87,9 @@ def create_saved_phrase(
         existing = dedup_query.first()
         if existing:
             updated = False
-            if not existing.translation and phrase_in.translation:
-                existing.translation = phrase_in.translation
+            ex_trans = (existing.translation or "").strip().lower()
+            if (not ex_trans or ex_trans == clean_text.lower() or ex_trans == "sem tradução cadastrada") and trans and trans.lower() != clean_text.lower():
+                existing.translation = trans
                 updated = True
             if not existing.context_sentence and phrase_in.context_sentence:
                 existing.context_sentence = phrase_in.context_sentence
@@ -92,7 +109,7 @@ def create_saved_phrase(
         video_id=phrase_in.video_id,
         transcript_segment_id=phrase_in.transcript_segment_id,
         text=clean_text,
-        translation=phrase_in.translation,
+        translation=trans,
         context_sentence=phrase_in.context_sentence,
         timestamp=phrase_in.timestamp,
         phrase_type=p_type,

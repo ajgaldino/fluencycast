@@ -35,6 +35,183 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { videoService } from '../../services/videos';
 import { Video } from '../../types/video';
 
+// Comprehensive built-in vocabulary dictionary for instant UI resolution and fail-safe translation
+export const LOCAL_WORD_DICT: Record<string, string> = {
+  quick: 'rápido, veloz',
+  quickly: 'rapidamente, depressa',
+  small: 'pequeno, curto',
+  safe: 'seguro, protegido',
+  safely: 'com segurança',
+  safety: 'segurança, proteção',
+  taboo: 'tabu, proibido',
+  stranger: 'estranho, desconhecido',
+  strangers: 'estranhos, desconhecidos',
+  silence: 'silêncio',
+  awkward: 'estranho, constrangedor',
+  bridge: 'ponte',
+  traffic: 'trânsito, tráfego',
+  elevator: 'elevador',
+  nervous: 'nervoso, ansioso',
+  weather: 'clima, tempo',
+  chat: 'conversa, bater papo',
+  store: 'loja',
+  grocery: 'mercearia, compras',
+  debate: 'debate, discussão',
+  friendly: 'amigável, simpático',
+  fill: 'preencher, encher',
+  connect: 'conectar, ligar',
+  honest: 'honesto, sincero',
+  honestly: 'honestamente, sinceramente',
+  native: 'nativo',
+  basically: 'basicamente',
+  casual: 'casual, informal',
+  light: 'leve, luz',
+  deep: 'profundo',
+  philosophical: 'filosófico',
+  huge: 'enorme, gigante',
+  vocabulary: 'vocabulário',
+  practice: 'praticar, treino',
+  speaking: 'fala, conversação',
+  perfect: 'perfeito',
+  place: 'lugar, colocar',
+  short: 'curto, breve',
+  topic: 'assunto, tópico',
+  topics: 'assuntos, tópicos',
+  conversation: 'conversa, diálogo',
+  conversations: 'conversas, diálogos',
+  channel: 'canal',
+  simple: 'simples',
+  funny: 'engraçado, divertido',
+  laugh: 'rir, risada',
+  smile: 'sorrir, sorriso',
+  happy: 'feliz, contente',
+  tired: 'cansado',
+  busy: 'ocupado',
+  ready: 'pronto, preparado',
+  smart: 'inteligente, esperto',
+  polite: 'educado, cortês',
+  advice: 'conselho',
+  secret: 'segredo',
+  politics: 'política',
+  religion: 'religião',
+  money: 'dinheiro',
+  salary: 'salário',
+  job: 'trabalho, emprego',
+  boss: 'chefe',
+  vacation: 'férias',
+  holiday: 'feriado',
+  weekend: 'fim de semana',
+  morning: 'manhã',
+  afternoon: 'tarde',
+  night: 'noite',
+  fast: 'rápido, veloz',
+  slow: 'lento, devagar',
+  loud: 'alto, barulhento',
+  quiet: 'quieto, silencioso',
+  calm: 'calmo, tranquilo',
+  cool: 'legal, fresco',
+  warm: 'morno, caloroso',
+  cold: 'frio',
+  hot: 'quente',
+  rain: 'chuva, chover',
+  sunny: 'ensolarado',
+  cloudy: 'nublado',
+  compliment: 'elogio, elogiar',
+  compliments: 'elogios',
+  common: 'comum',
+  popular: 'popular',
+  interesting: 'interessante',
+  boring: 'chato, entediante',
+  fun: 'divertido, diversão',
+  break: 'pausa, quebrar',
+  finish: 'terminar, concluir',
+  learn: 'aprender',
+  teach: 'ensinar',
+  study: 'estudar',
+  remember: 'lembrar',
+  forget: 'esquecer',
+  choose: 'escolher',
+  decide: 'decidir',
+  hope: 'esperar, torcer',
+  wish: 'desejar, desejo',
+  believe: 'acreditar',
+  share: 'compartilhar',
+  care: 'se importar, cuidar',
+  worry: 'preocupar-se',
+  enjoy: 'aproveitar, curtir',
+  hate: 'odiar',
+  love: 'amar, amor',
+  like: 'gostar de',
+  mistake: 'erro, engano',
+  feeling: 'sentimento, sensação',
+  opinion: 'opinião',
+  truth: 'verdade',
+  world: 'mundo',
+  city: 'cidade',
+  food: 'comida',
+  water: 'água',
+  drink: 'beber, bebida',
+  eat: 'comer',
+  buy: 'comprar',
+  cheap: 'barato',
+  expensive: 'caro',
+  open: 'abrir, aberto',
+  close: 'fechar, perto',
+  clean: 'limpo, limpar',
+  new: 'novo',
+  old: 'velho, antigo',
+  big: 'grande',
+  chance: 'chance, oportunidade',
+  reason: 'razão, motivo',
+  choice: 'escolha, opção',
+  goal: 'meta, objetivo',
+  plan: 'plano, planejar',
+  future: 'futuro',
+  moment: 'momento',
+  time: 'tempo, hora',
+  life: 'vida',
+  people: 'pessoas, gente',
+  friend: 'amigo, amiga',
+  work: 'trabalhar, trabalho',
+  day: 'dia',
+  way: 'maneira, caminho',
+  thing: 'coisa',
+  someone: 'alguém',
+  everyone: 'todos, todo mundo',
+  anyone: 'qualquer pessoa',
+  difficult: 'difícil',
+  easy: 'fácil',
+  hard: 'difícil, duro',
+  rude: 'rude, grosseiro',
+  wonderful: 'maravilhoso',
+  great: 'ótimo, excelente',
+  important: 'importante',
+  always: 'sempre',
+  never: 'nunca',
+  sometimes: 'às vezes',
+  really: 'realmente, muito',
+  right: 'certo, correto',
+  wrong: 'errado, incorreto'
+};
+
+export function getResolvedTranslation(phrase?: { text: string; translation?: string } | null): string {
+  if (!phrase) return '';
+  const trans = (phrase.translation || '').trim();
+  const text = (phrase.text || '').trim();
+  const isUntranslated = !trans || trans.toLowerCase() === text.toLowerCase() || trans === 'Sem tradução cadastrada';
+
+  if (!isUntranslated) return trans;
+
+  const clean = text.toLowerCase().replace(/[^a-z]/g, '');
+  if (LOCAL_WORD_DICT[clean]) return LOCAL_WORD_DICT[clean];
+  if (clean.endsWith('s') && LOCAL_WORD_DICT[clean.slice(0, -1)]) return LOCAL_WORD_DICT[clean.slice(0, -1)];
+  if (clean.endsWith('es') && LOCAL_WORD_DICT[clean.slice(0, -2)]) return LOCAL_WORD_DICT[clean.slice(0, -2)];
+  if (clean.endsWith('ing') && LOCAL_WORD_DICT[clean.slice(0, -3)]) return LOCAL_WORD_DICT[clean.slice(0, -3)];
+  if (clean.endsWith('ed') && LOCAL_WORD_DICT[clean.slice(0, -2)]) return LOCAL_WORD_DICT[clean.slice(0, -2)];
+
+  return trans && trans.toLowerCase() !== text.toLowerCase() ? trans : 'significado contextual';
+}
+
 export const Reviews: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlVideoId = searchParams.get('video_id') || 'ALL';
@@ -190,15 +367,21 @@ export const Reviews: React.FC = () => {
   useEffect(() => {
     if (!currentPhrase || studyMethod !== 'CHOICE') return;
 
+    const resolvedTranslation = getResolvedTranslation(currentPhrase);
     const targetAnswer = isReverse
       ? currentPhrase.text
-      : currentPhrase.translation || 'Sem tradução cadastrada';
+      : resolvedTranslation;
 
     // Collect candidate pool from other phrases
     const pool = phrases
       .filter((p) => p.id !== currentPhrase.id)
-      .map((p) => (isReverse ? p.text : p.translation))
-      .filter((t): t is string => Boolean(t && t.trim() && t !== targetAnswer));
+      .map((p) => (isReverse ? p.text : getResolvedTranslation(p)))
+      .filter((t): t is string => Boolean(
+        t &&
+        t.trim() &&
+        t.trim().toLowerCase() !== targetAnswer.trim().toLowerCase() &&
+        t.trim().toLowerCase() !== currentPhrase.text.trim().toLowerCase()
+      ));
 
     const fallbackPoolPt = [
       'pensar, acreditar, achar',
@@ -212,7 +395,11 @@ export const Reviews: React.FC = () => {
       'amigo, parceiro',
       'ouvir, prestar atenção',
       'vida real, cotidiano',
-      'decidir com certeza'
+      'decidir com certeza',
+      'seguro, protegido',
+      'estranho, desconhecido',
+      'rápido, veloz',
+      'pequeno, curto'
     ];
 
     const fallbackPoolEn = [
@@ -233,7 +420,12 @@ export const Reviews: React.FC = () => {
     const combinedPool = [...pool, ...(isReverse ? fallbackPoolEn : fallbackPoolPt)];
 
     for (const item of combinedPool) {
-      if (item && item !== targetAnswer && !distractors.includes(item)) {
+      if (
+        item &&
+        item.trim().toLowerCase() !== targetAnswer.trim().toLowerCase() &&
+        item.trim().toLowerCase() !== currentPhrase.text.trim().toLowerCase() &&
+        !distractors.some((d) => d.trim().toLowerCase() === item.trim().toLowerCase())
+      ) {
         distractors.push(item);
         if (distractors.length >= 3) break;
       }
@@ -244,7 +436,7 @@ export const Reviews: React.FC = () => {
     setChoiceOptions(shuffled);
     setSelectedChoice(null);
     setChoiceResult(null);
-  }, [currentIndex, currentPhrase?.id, studyMethod, isReverse, phrases]);
+  }, [currentIndex, currentPhrase?.id, currentPhrase?.translation, currentPhrase?.text, studyMethod, isReverse, phrases]);
 
   // Auto-pronounce native audio
   useEffect(() => {
@@ -261,12 +453,30 @@ export const Reviews: React.FC = () => {
     }
   }, [currentIndex, studyMethod]);
 
-  // Pre-fetch automatic translation if empty
+  // Pre-fetch automatic translation if empty or untranslated
   useEffect(() => {
     if (!currentPhrase) return;
-    if (!currentPhrase.translation || currentPhrase.translation.trim() === '' || currentPhrase.translation === 'Sem tradução cadastrada') {
+    const trans = (currentPhrase.translation || '').trim();
+    const isUntranslated = !trans ||
+      trans === 'Sem tradução cadastrada' ||
+      trans.toLowerCase() === currentPhrase.text.trim().toLowerCase();
+
+    if (isUntranslated) {
       let isMounted = true;
       setAutoTranslating(true);
+
+      const localResolved = getResolvedTranslation(currentPhrase);
+      if (
+        localResolved &&
+        localResolved !== 'significado contextual' &&
+        localResolved.toLowerCase() !== currentPhrase.text.trim().toLowerCase()
+      ) {
+        setPhrases((prev) =>
+          prev.map((p, idx) => (idx === currentIndex ? { ...p, translation: localResolved } : p))
+        );
+        phraseService.updatePhrase(currentPhrase.id, { translation: localResolved }).catch(() => {});
+      }
+
       aiService.translate(currentPhrase.text).then(async (res) => {
         if (!isMounted) return;
         if (res.translation && res.translation.toLowerCase() !== currentPhrase.text.toLowerCase()) {
@@ -287,7 +497,7 @@ export const Reviews: React.FC = () => {
         isMounted = false;
       };
     }
-  }, [currentIndex, currentPhrase?.id]);
+  }, [currentIndex, currentPhrase?.id, currentPhrase?.translation, currentPhrase?.text]);
 
   // Trigger floating XP effect
   const triggerFloatingXp = (text: string) => {
@@ -417,7 +627,7 @@ export const Reviews: React.FC = () => {
 
     const targetAnswer = isReverse
       ? currentPhrase.text
-      : currentPhrase.translation || 'Sem tradução cadastrada';
+      : getResolvedTranslation(currentPhrase);
 
     const isCorrect = opt.trim().toLowerCase() === targetAnswer.trim().toLowerCase();
 
@@ -565,7 +775,7 @@ export const Reviews: React.FC = () => {
 
     const expected = isReverse
       ? normalizeAnswer(currentPhrase.text)
-      : normalizeAnswer(currentPhrase.translation || '');
+      : normalizeAnswer(getResolvedTranslation(currentPhrase));
     const given = normalizeAnswer(typedAnswer);
 
     if (given === expected) {
@@ -1211,7 +1421,7 @@ export const Reviews: React.FC = () => {
                     🇧🇷 Como se diz em inglês:
                   </div>
                   <div className="card-main-text" style={{ color: 'var(--accent-cyan)' }}>
-                    {currentPhrase.translation || '(tradução pendente)'}
+                    {getResolvedTranslation(currentPhrase) || '(tradução pendente)'}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Fale em voz alta ou pense na frase em inglês
@@ -1303,7 +1513,7 @@ export const Reviews: React.FC = () => {
                   {choiceOptions.map((opt, idx) => {
                     const targetAnswer = isReverse
                       ? currentPhrase.text
-                      : currentPhrase.translation || 'Sem tradução cadastrada';
+                      : getResolvedTranslation(currentPhrase);
                     const isTarget = opt.trim().toLowerCase() === targetAnswer.trim().toLowerCase();
                     const isPicked = selectedChoice === opt;
 
@@ -1351,7 +1561,7 @@ export const Reviews: React.FC = () => {
                             <span>Você acertou a tradução! (+20 XP)</span>
                           ) : (
                             <strong style={{ color: '#ffffff', fontSize: '0.96rem' }}>
-                              "{isReverse ? currentPhrase.text : currentPhrase.translation}"
+                              "{isReverse ? currentPhrase.text : getResolvedTranslation(currentPhrase)}"
                             </strong>
                           )}
                         </div>
@@ -1439,7 +1649,7 @@ export const Reviews: React.FC = () => {
                   {isReverse ? (
                     <>Correto: <strong style={{ color: '#fff' }}>"{currentPhrase.text}"</strong></>
                   ) : (
-                    <>Correto: <strong style={{ color: 'var(--accent-cyan)' }}>"{currentPhrase.translation}"</strong></>
+                    <>Correto: <strong style={{ color: 'var(--accent-cyan)' }}>"{getResolvedTranslation(currentPhrase)}"</strong></>
                   )}
                 </div>
                 <button
@@ -1475,7 +1685,7 @@ export const Reviews: React.FC = () => {
                           </div>
                         ) : (
                           <div style={{ fontSize: effectiveMode === 'WORD' ? '1.65rem' : '1.35rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>
-                            {currentPhrase.translation || '(Sem tradução)'}
+                            {getResolvedTranslation(currentPhrase) || '(Sem tradução)'}
                           </div>
                         )}
                       </>
