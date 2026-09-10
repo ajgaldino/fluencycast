@@ -112,3 +112,33 @@ def test_parse_transcript_text_standalone_seconds_label():
     assert segments[1]["text"] == "Second phrase."
 
 
+def test_parse_transcript_text_compound_minutes_and_seconds():
+    from app.services.youtube import parse_transcript_text
+
+    raw = """1:051 minuto e 5 segundosIt's not a deep philosophical debate.
+1:081 minuto e 8 segundosRight. It's just a friendly way to fill the silence and to connect with someone.
+1:401 minuto e 40 segundosYes. And for English learners, it's the perfect place to practice speaking because the conversations are short, right? You don't need a huge vocabulary.
+5:005 minutosAnd then you could just say, "Yes, it's my favorite." And the conversation ends nicely."""
+
+    segments = parse_transcript_text(raw)
+    assert len(segments) == 4
+
+    assert segments[0]["start_time"] == 65.0
+    assert segments[0]["text"] == "It's not a deep philosophical debate."
+    assert "segundo" not in segments[0]["text"].lower()
+    assert "minuto" not in segments[0]["text"].lower()
+
+    assert segments[1]["start_time"] == 68.0
+    assert segments[1]["text"].startswith("Right. It's just a friendly way")
+    assert "segundo" not in segments[1]["text"].lower()
+
+    assert segments[2]["start_time"] == 100.0
+    assert segments[2]["text"].startswith("Yes. And for English learners")
+    assert "segundo" not in segments[2]["text"].lower()
+    assert "40" not in segments[2]["text"]
+
+    assert segments[3]["start_time"] == 300.0
+    assert segments[3]["text"].startswith('And then you could just say, "Yes, it\'s my favorite."')
+
+
+

@@ -236,13 +236,33 @@ def clean_transcript_token(text: str) -> str:
     text = text.replace('♪', ' ').replace('♫', ' ')
     # Remove speaker arrows like >> or >>>
     text = re.sub(r'^(?:>>|>>>|\>)\s*', '', text)
-    # Strip any leading residual timestamp or duration e.g. "40segundos", "0:40", "0:4040segundos", "8 segundos"
-    text = re.sub(
-        r'^(?:(?:(?:\d{1,2}:)?\d{1,2}:\d{2})|\d+)\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|s|m)?(?:\s*(?:e|and)\s*\d+\s*(?:segundos?|seconds?))?\s*[-–:]?\s*',
-        '',
-        text,
-        flags=re.IGNORECASE
+    # Strip any leading timestamp prefix like [0:08], 0:08, 1:05:20
+    text = re.sub(r'^\s*(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2}(?:[.,]\d+)?)(?:\]|\))?\s*[-–:]?\s*', '', text)
+
+    # Strip any duration description prefix (e.g. "1 minuto e 5 segundos", "8 segundos", "e 5 segundos", "40segundos")
+    duration_prefix_re = re.compile(
+        r'^\s*'
+        r'(?:'
+        r'(?:\d+\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?'
+        r'(?:\d+\s*(?:minutos?|minutes?|min|m)\s*(?:e|,|and)?\s*)?'
+        r'(?:(?:e|,|and)\s*)?'
+        r'(?:\d+\s*(?:segundos?|seconds?|seg|s))'
+        r'|'
+        r'(?:\d+\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?'
+        r'(\d+\s*(?:minutos?|minutes?|min|m))'
+        r'|'
+        r'(\d+\s*(?:horas?|hours?|h))'
+        r'|'
+        r'(?:(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?|seg|s))'
+        r')'
+        r'\s*[-–:]?\s*',
+        re.IGNORECASE
     )
+    text = duration_prefix_re.sub('', text)
+    # Strip any residual leading duration or separator
+    text = re.sub(r'^\s*(?:(?:e|and|,)\s*)?\d+\s*(?:segundos?|seconds?|minutos?|minutes?)\s*[-–:]?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^\s*[-–:]\s*', '', text)
+
     # Add space after punctuation if glued to word (e.g. "Yes.And" -> "Yes. And")
     text = re.sub(r'([.?!,;:])([A-Za-z])', r'\1 \2', text)
     # Normalize whitespaces
@@ -323,20 +343,9 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
         return srt_matches
 
     # 2. General parsing: Match timestamps at beginning or end
-    # Handles: '0:08', '[0:08]', '(0:08)', '0:088 segundosHello', '0:08 - Hello'
+    # Handles: '0:08', '[0:08]', '(0:08)', '0:088 segundosHello', '1:051 minuto e 5 segundos...'
     ts_start_re = re.compile(
-        r'^(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2}(?:[.,]\d+)?)(?:\]|\))?'
-        r'(?:'
-        r'\d*\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|m|s)'
-        r'(?:\s*(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?|minutos?|minutes?))?'
-        r')?'
-        r'(?:\s*[-–:]\s*|\s+|$)(.*)$',
-        re.IGNORECASE
-    )
-
-    # Compact start pattern (e.g. 0:011 segundo[music])
-    ts_compact_re = re.compile(
-        r'^(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2})(?:\]|\))?(.*)$'
+        r'^(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2}(?:[.,]\d+)?)(?:\]|\))?(.*)$'
     )
 
     # End timestamp pattern: 'Hello everyone (0:08)'
@@ -344,21 +353,19 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
         r'^(.*?)(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2})(?:\]|\))?$'
     )
 
-    accessibility_label_re = re.compile(
-        r'^\d*\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?)(?:\s*(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?))?\s*',
-        re.IGNORECASE
-    )
-
     # Standalone label timestamp without mm:ss e.g. "40segundosYes", "40 segundos Yes", "1 minuto e 5 segundos Yes"
     ts_label_only_re = re.compile(
         r'^(?:'
-        r'(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e\s*)?)?'
-        r'(?:(\d+)\s*(?:minutos?|minutes?|min|m)\s*(?:e\s*)?)?'
+        r'(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?'
+        r'(?:(\d+)\s*(?:minutos?|minutes?|min|m)\s*(?:e|,|and)?\s*)?'
+        r'(?:(?:e|,|and)\s*)?'
         r'(?:(\d+)\s*(?:segundos?|seconds?|seg|s))'
         r'|'
-        r'(?:(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e\s*)?)?'
-        r'(\d+)\s*(?:minutos?|minutes?|min|m))'
-        r')\s*(.*)$',
+        r'(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?'
+        r'(\d+)\s*(?:minutos?|minutes?|min|m)'
+        r'|'
+        r'(\d+\s*(?:horas?|hours?|h))'
+        r')\s*[-–:]?\s*(.*)$',
         re.IGNORECASE
     )
 
@@ -373,7 +380,7 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
             continue
 
         # Try timestamp at start
-        m_start = ts_start_re.match(line) or ts_compact_re.match(line)
+        m_start = ts_start_re.match(line)
         if m_start:
             if curr_time is not None and curr_text:
                 joined = clean_transcript_token(' '.join(curr_text))
@@ -383,7 +390,6 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
 
             curr_time = parse_time_str(m_start.group(1))
             rest = m_start.group(2) if len(m_start.groups()) >= 2 else ""
-            rest = accessibility_label_re.sub('', rest).strip()
             rest_clean = clean_transcript_token(rest)
             if rest_clean:
                 curr_text.append(rest_clean)
@@ -398,11 +404,11 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
                     raw_entries.append((curr_time, joined))
                 curr_text = []
 
-            h = int(m_label.group(1) or m_label.group(4) or 0)
+            h = int(m_label.group(1) or m_label.group(4) or m_label.group(6) or 0)
             mins = int(m_label.group(2) or m_label.group(5) or 0)
             secs = int(m_label.group(3) or 0)
             curr_time = float(h * 3600 + mins * 60 + secs)
-            rest = m_label.group(6) or ""
+            rest = m_label.groups()[-1] or ""
             rest_clean = clean_transcript_token(rest)
             if rest_clean:
                 curr_text.append(rest_clean)
@@ -425,8 +431,7 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
             continue
 
         # Continuation line
-        clean_line = accessibility_label_re.sub('', line).strip()
-        clean_line = clean_transcript_token(clean_line)
+        clean_line = clean_transcript_token(line)
         if clean_line:
             curr_text.append(clean_line)
 

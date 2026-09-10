@@ -165,10 +165,15 @@ export const VideoStudy: React.FC = () => {
 
   // Displayed Segments (natural transcript segments with automatic subtitle text sanitization)
   const displayedSegments = useMemo(() => {
+    const durationPrefixRe = /^\s*(?:(?:(?:\d+\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?(?:\d+\s*(?:minutos?|minutes?|min|m)\s*(?:e|,|and)?\s*)?(?:(?:e|,|and)\s*)?(?:\d+\s*(?:segundos?|seconds?|seg|s)))|(?:\d+\s*(?:horas?|hours?|h)\s*(?:e|,|and)?\s*)?(\d+\s*(?:minutos?|minutes?|min|m))|(\d+\s*(?:horas?|hours?|h))|(?:(?:e|and|,)\s*\d+\s*(?:segundos?|seconds?|seg|s)))\s*[-–:]?\s*/i;
+
     return (video?.segments || []).map((seg) => {
-      // Strip any residual timestamp or duration e.g. "40segundos", "0:08", "8 segundos"
+      // Strip any residual timestamp or duration e.g. "40segundos", "0:08", "8 segundos", "1 minuto e 5 segundos", "e 5 segundos"
       let clean = seg.text
-        .replace(/^(?:(?:(?:\d{1,2}:)?\d{1,2}:\d{2})|\d+)\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|s|m)?(?:\s*(?:e|and)\s*\d+\s*(?:segundos?|seconds?))?\s*[-–:]?\s*/i, '')
+        .replace(/^\s*(?:\[|\()?((?:(?:\d{1,2}):)?\d{1,2}:\d{2}(?:[.,]\d+)?)(?:\]|\))?\s*[-–:]?\s*/i, '')
+        .replace(durationPrefixRe, '')
+        .replace(/^\s*(?:(?:e|and|,)\s*)?\d+\s*(?:segundos?|seconds?|minutos?|minutes?)\s*[-–:]?\s*/i, '')
+        .replace(/^\s*[-–:]\s*/, '')
         .replace(/\[\s*(?:music|música|musica|applause|aplausos|laughter|risos|som|áudio)\s*\]/gi, '')
         .replace(/\(\s*(?:music|música|musica|applause|aplausos)\s*\)/gi, '')
         .replace(/[♪♫]/g, '')
