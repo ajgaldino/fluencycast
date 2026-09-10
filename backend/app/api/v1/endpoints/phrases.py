@@ -133,6 +133,7 @@ STOPWORDS = {
 @router.post("/extract-words", response_model=List[SavedPhraseResponse])
 def extract_words_from_phrases(
     video_id: Optional[str] = None,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
@@ -142,7 +143,7 @@ def extract_words_from_phrases(
     Otherwise, extracts from saved phrases.
     """
     if video_id and video_id.strip() and video_id.upper() != "ALL":
-        return extract_keywords_for_video(video_id, current_user.id, db)
+        return extract_keywords_for_video(video_id, current_user.id, db, max_keywords=limit or 150)
 
     import re
     from app.api.v1.endpoints.ai import translate_text, TranslateRequest, CORE_DICTIONARY
@@ -157,6 +158,7 @@ def extract_words_from_phrases(
         for p in db.query(SavedPhrase)
         .filter(SavedPhrase.user_id == current_user.id, func.upper(SavedPhrase.phrase_type) == "WORD")
         .all()
+        if p.text
     }
 
     created_word_cards = []
@@ -176,7 +178,7 @@ def extract_words_from_phrases(
                 seen_in_batch.add(clean_w)
                 existing_words.add(clean_w)
 
-        for word in candidates[:10]:
+        for word in candidates[:25]:
             tr = translate_text(TranslateRequest(text=word), current_user=current_user)
             trans = tr.translation if tr.translation.lower() != word else ""
             if not trans and word in CORE_DICTIONARY:

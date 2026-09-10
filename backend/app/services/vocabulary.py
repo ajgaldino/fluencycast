@@ -36,7 +36,12 @@ STOPWORDS = {
     "get", "go", "got", "like", "one", "two", "three", "four", "see",
     "gonna", "wanna", "gotta", "kinda", "sorta", "dude", "cool", "whoa", "huh",
     "umm", "um", "uh", "ah", "ha", "haha", "cause", "cuz", "alright", "yall",
-    "guys", "guy", "bye", "hello", "hi", "etc", "la", "na", "something", "everything"
+    "guys", "guy", "bye", "hello", "hi", "etc", "la", "na", "something", "everything",
+    # Contraction stems without apostrophe
+    "don", "doesn", "didn", "haven", "hasn", "hadn", "won", "wouldn", "shouldn", "couldn",
+    "aren", "isn", "wasn", "weren",
+    # Residual transcript labels
+    "segundo", "segundos", "minuto", "minutos", "hora", "horas", "music", "música", "musica"
 }
 
 
@@ -44,7 +49,7 @@ def extract_keywords_for_video(
     video_id: str,
     user_id: str,
     db: Session,
-    max_keywords: int = 50
+    max_keywords: int = 150
 ) -> List[SavedPhrase]:
     """
     Extracts high-impact vocabulary words directly from a video's transcript segments,
@@ -100,13 +105,15 @@ def extract_keywords_for_video(
         return []
 
     # 4. Score and rank candidates:
-    # Prioritize words in CORE_DICTIONARY (+10), repetition/frequency (+2 per repetition, up to 10),
-    # and optimal word length 4-12 (+2)
+    # Strongly reward frequency in this specific video (+3 per repetition),
+    # substantive word length 5-14 (+2), and core dictionary (+2)
     def word_score(w: str) -> float:
-        score = min(word_freq[w] * 2.0, 10.0)
+        score = word_freq[w] * 3.0
+        if 5 <= len(w) <= 14:
+            score += 2.0
+        elif len(w) == 4:
+            score += 1.0
         if w in CORE_DICTIONARY:
-            score += 10.0
-        if 4 <= len(w) <= 12:
             score += 2.0
         return score
 
@@ -155,7 +162,7 @@ def extract_keywords_for_video(
             except Exception:
                 return word_to_tr, word_to_tr
 
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        with ThreadPoolExecutor(max_workers=10) as pool:
             results = list(pool.map(fetch_trans, words_needing_translation))
             for w, tr in results:
                 translations[w] = tr

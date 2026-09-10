@@ -17,8 +17,9 @@ export const videoService = {
     });
   },
 
-  async extractKeywords(videoId: string): Promise<any[]> {
-    return request<any[]>(`/videos/${videoId}/extract-keywords`, {
+  async extractKeywords(videoId: string, limit?: number): Promise<any[]> {
+    const query = limit ? `?limit=${limit}` : '';
+    return request<any[]>(`/videos/${videoId}/extract-keywords${query}`, {
       method: 'POST',
     });
   },

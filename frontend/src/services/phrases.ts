@@ -45,9 +45,12 @@ export const phraseService = {
     });
   },
 
-  async extractWords(videoId?: string): Promise<SavedPhrase[]> {
-    const query = videoId ? `?video_id=${videoId}` : '';
-    return request<SavedPhrase[]>(`/phrases/extract-words${query}`, {
+  async extractWords(videoId?: string, limit?: number): Promise<SavedPhrase[]> {
+    const params = new URLSearchParams();
+    if (videoId) params.append('video_id', videoId);
+    if (limit) params.append('limit', String(limit));
+    const qs = params.toString();
+    return request<SavedPhrase[]>(`/phrases/extract-words${qs ? `?${qs}` : ''}`, {
       method: 'POST',
     });
   },

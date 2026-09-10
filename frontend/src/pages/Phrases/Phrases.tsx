@@ -701,7 +701,7 @@ export const Phrases: React.FC = () => {
                 title="Extrair palavras-chave da transcrição"
               >
                 {extractingWords ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} color="var(--accent-cyan)" />}
-                <span>Re-extrair Palavras</span>
+                <span>+ Extrair Mais Palavras</span>
               </button>
             </div>
           </div>

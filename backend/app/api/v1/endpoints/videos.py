@@ -71,7 +71,7 @@ def create_video(
     if existing:
         # Check if existing video has keywords; if not, extract them
         try:
-            extract_keywords_for_video(existing.id, current_user.id, db)
+            extract_keywords_for_video(existing.id, current_user.id, db, max_keywords=150)
         except Exception as e:
             print(f"[Vocabulary] Error extracting keywords for existing video {existing.id}: {e}")
         return existing
@@ -127,7 +127,7 @@ def create_video(
 
     # Automatically extract key vocabulary words from this video and create WORD flashcards
     try:
-        extract_keywords_for_video(video.id, current_user.id, db)
+        extract_keywords_for_video(video.id, current_user.id, db, max_keywords=150)
     except Exception as err:
         print(f"[Vocabulary] Error extracting keywords for new video {video.id}: {err}")
 
@@ -137,6 +137,7 @@ def create_video(
 @router.post("/{id}/extract-keywords", response_model=List[SavedPhraseResponse])
 def extract_video_keywords_endpoint(
     id: str,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
@@ -151,7 +152,7 @@ def extract_video_keywords_endpoint(
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    created = extract_keywords_for_video(video.id, current_user.id, db)
+    created = extract_keywords_for_video(video.id, current_user.id, db, max_keywords=limit or 150)
     return created
 
 
