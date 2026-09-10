@@ -15,7 +15,6 @@ export const Videos: React.FC = () => {
   const [url, setUrl] = useState('');
   const [category, setCategory] = useState<'video' | 'music'>('video');
   const [manualTranscript, setManualTranscript] = useState('');
-  const [showManualInput, setShowManualInput] = useState(false);
   const [step, setStep] = useState<ProcessingStep>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdVideo, setCreatedVideo] = useState<Video | null>(null);
@@ -36,13 +35,21 @@ export const Videos: React.FC = () => {
     loadVideos();
   }, []);
 
-  const handleProcessVideo = async (e?: React.FormEvent, customPayload?: { url: string; category: 'video' | 'music'; raw_transcript?: string }) => {
+  const handleProcessVideo = async (e?: React.FormEvent, customPayload?: { url: string; category: 'video' | 'music'; raw_transcript?: string; forceAuto?: boolean }) => {
     if (e) e.preventDefault();
-    const targetUrl = customPayload?.url || url;
+    const targetUrl = (customPayload?.url || url).trim();
     const targetCategory = customPayload?.category || category;
-    const targetTranscript = customPayload?.raw_transcript || (showManualInput ? manualTranscript : undefined);
+    const targetTranscript = customPayload?.raw_transcript !== undefined 
+      ? customPayload.raw_transcript 
+      : manualTranscript.trim();
 
-    if (!targetUrl.trim()) return;
+    if (!targetUrl) return;
+
+    // Na nuvem (Render), se o usuário não colou a transcrição e não forçou busca automática
+    if (!targetTranscript && !customPayload?.forceAuto) {
+      setErrorMessage('⚠️ Na nuvem (Render), o YouTube bloqueia o download automático de legendas. Por favor, cole a transcrição do vídeo abaixo (ou escolha um dos conteúdos verificados).');
+      return;
+    }
 
     setErrorMessage(null);
     setStep('fetching');
@@ -54,7 +61,7 @@ export const Videos: React.FC = () => {
       const video = await videoService.createVideo({
         url: targetUrl,
         category: targetCategory,
-        raw_transcript: targetTranscript
+        raw_transcript: targetTranscript || undefined
       });
 
       clearTimeout(fetchTimer);
@@ -67,18 +74,13 @@ export const Videos: React.FC = () => {
       setStep('error');
       const msg = err.message || 'Falha ao processar vídeo';
       setErrorMessage(msg);
-      // If blocked by YouTube or no transcript found, automatically offer manual paste
-      if (msg.includes('Render IP ban') || msg.includes('bloqueou') || msg.includes('legendas')) {
-        setShowManualInput(true);
-      }
     }
   };
 
-  const handleSelectSample = (sample: typeof SAMPLE_CONTENTS[0]) => {
+  const handleSelectSample = (sample: SampleVideo) => {
     setUrl(sample.url);
     setCategory(sample.category);
     setManualTranscript(sample.transcript);
-    setShowManualInput(true);
     handleProcessVideo(undefined, {
       url: sample.url,
       category: sample.category,
@@ -90,7 +92,6 @@ export const Videos: React.FC = () => {
     setShowAddModal(false);
     setUrl('');
     setManualTranscript('');
-    setShowManualInput(false);
     setStep('idle');
     setErrorMessage(null);
     setCreatedVideo(null);
@@ -169,35 +170,55 @@ export const Videos: React.FC = () => {
                 </label>
               </div>
 
-              {/* Botão para colar transcrição manual */}
-              {!showManualInput && (
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(true)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-link)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                  >
-                    <FileText size={15} />
-                    <span>Prefere colar a transcrição ou letra manualmente?</span>
-                  </button>
+              {errorMessage && step === 'idle' && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.6rem',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(244, 63, 94, 0.12)',
+                  border: '1px solid rgba(244, 63, 94, 0.3)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--accent-rose)',
+                  fontSize: '0.86rem',
+                  marginBottom: '1rem'
+                }}>
+                  <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span>{errorMessage}</span>
                 </div>
               )}
 
-              {showManualInput && (
-                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                  <label className="form-label">
-                    Transcrição ou Letra (com ou sem timestamps do YouTube):
+              {/* Transcrição Manual sempre visível */}
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>
+                    Transcrição ou Letra do Vídeo:
                   </label>
-                  <textarea
-                    className="form-input"
-                    rows={5}
-                    placeholder={`Cole aqui a transcrição copiada do YouTube (ex: 0:12 Hello world) ou letra da música...`}
-                    value={manualTranscript}
-                    onChange={(e) => setManualTranscript(e.target.value)}
-                    style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                  />
+                  <span style={{ fontSize: '0.76rem', color: 'var(--accent-amber)', fontWeight: 600 }}>
+                    ⭐ Recomendado para o Render
+                  </span>
                 </div>
-              )}
+                <textarea
+                  className="form-input"
+                  rows={5}
+                  placeholder="Cole aqui a transcrição do YouTube (ex: 0:12 Hello world) ou a letra da música..."
+                  value={manualTranscript}
+                  onChange={(e) => setManualTranscript(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.35rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                    💡 No YouTube: clique em "... Mais" abaixo do vídeo &gt; "Mostrar transcrição", copie e cole aqui.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleProcessVideo(undefined, { url, category, forceAuto: true })}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.75rem', textDecoration: 'underline' }}
+                  >
+                    Tentar buscar do YouTube automaticamente
+                  </button>
+                </div>
+              </div>
 
               {/* Quick Samples */}
               <div style={{ padding: '0.85rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem' }}>
@@ -366,6 +387,9 @@ export const Videos: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button onClick={() => setStep('idle')} className="btn btn-secondary">
+                  Voltar ao Formulário
+                </button>
                 <button onClick={resetModal} className="btn btn-secondary">
                   Cancelar
                 </button>
