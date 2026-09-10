@@ -6,51 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 type ProcessingStep = 'idle' | 'fetching' | 'transcribing' | 'saving' | 'ready' | 'error';
 
-const SAMPLE_CONTENTS = [
-  {
-    title: "Steve Jobs - Stanford Speech (2005)",
-    channel: "Stanford University",
-    url: "https://www.youtube.com/watch?v=UF8uR6Z6KLc",
-    category: "video" as const,
-    transcript: `0:00 I am honored to be with you today at your commencement from one of the finest universities in the world.
-0:08 Truth be told, I never graduated from college.
-0:13 This is the closest I've ever gotten to a college graduation.
-0:18 Today I want to tell you three stories from my life.
-0:23 That's it. No big deal. Just three stories.
-0:29 The first story is about connecting the dots.
-0:35 You can't connect the dots looking forward; you can only connect them looking backwards.
-0:42 So you have to trust that the dots will somehow connect in your future.
-0:48 You have to trust in something: your gut, destiny, life, karma, whatever.
-0:56 This approach has never let me down, and it has made all the difference in my life.`
-  },
-  {
-    title: "How I Learned English Fast",
-    channel: "English Fluency Journey",
-    url: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
-    category: "video" as const,
-    transcript: `0:01 Welcome back to the channel.
-0:05 Today I want to talk about how I improved my listening skills.
-0:11 When I was younger, I used to travel a lot with my family.
-0:17 I watched real interviews and listened to podcasts every single day.
-0:24 Consistency was the key to unlocking my fluency.`
-  },
-  {
-    title: "Imagine - John Lennon",
-    channel: "John Lennon",
-    url: "https://www.youtube.com/watch?v=YkgkThdzX-8",
-    category: "music" as const,
-    transcript: `0:03 Imagine there's no heaven
-0:09 It's easy if you try
-0:15 No hell below us
-0:21 Above us, only sky
-0:27 Imagine all the people
-0:33 Livin' for today
-0:40 Imagine there's no countries
-0:46 It isn't hard to do
-0:52 Nothing to kill or die for
-0:58 And no religion, too`
-  }
-];
+import { SAMPLE_CONTENTS, SampleVideo } from '../../data/sampleVideos';
 
 export const Videos: React.FC = () => {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -260,6 +216,11 @@ export const Videos: React.FC = () => {
                     >
                       <span>{sample.category === 'music' ? '🎵' : '🎬'}</span>
                       <span style={{ fontWeight: 600 }}>{sample.title}</span>
+                      {sample.badge && (
+                        <span style={{ fontSize: '0.72rem', background: 'rgba(245, 158, 11, 0.2)', color: 'var(--accent-amber)', padding: '0.1rem 0.4rem', borderRadius: '4px', marginLeft: '0.4rem', fontWeight: 600 }}>
+                          {sample.badge}
+                        </span>
+                      )}
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: 'auto' }}>{sample.channel}</span>
                     </button>
                   ))}
