@@ -163,9 +163,24 @@ export const VideoStudy: React.FC = () => {
     };
   }, [id]);
 
-  // Displayed Segments (natural transcript segments)
+  // Displayed Segments (natural transcript segments with automatic subtitle text sanitization)
   const displayedSegments = useMemo(() => {
-    return video?.segments || [];
+    return (video?.segments || []).map((seg) => {
+      // Strip any residual timestamp or duration e.g. "40segundos", "0:08", "8 segundos"
+      let clean = seg.text
+        .replace(/^(?:(?:(?:\d{1,2}:)?\d{1,2}:\d{2})|\d+)\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|s|m)?(?:\s*(?:e|and)\s*\d+\s*(?:segundos?|seconds?))?\s*[-–:]?\s*/i, '')
+        .replace(/\[\s*(?:music|música|musica|applause|aplausos|laughter|risos|som|áudio)\s*\]/gi, '')
+        .replace(/\(\s*(?:music|música|musica|applause|aplausos)\s*\)/gi, '')
+        .replace(/[♪♫]/g, '')
+        .replace(/([.?!,;:])([A-Za-z])/g, '$1 $2')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return {
+        ...seg,
+        text: clean || seg.text,
+      };
+    });
   }, [video?.segments]);
 
   // 2. Initialize YouTube IFrame Player
@@ -191,7 +206,6 @@ export const VideoStudy: React.FC = () => {
       try {
         playerRef.current = new window.YT.Player('yt-study-player', {
           videoId: video.youtube_id,
-          host: 'https://www.youtube.com',
           playerVars: {
             autoplay: 0,
             controls: 1,

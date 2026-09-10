@@ -92,3 +92,23 @@ Second subtitle line."""
     assert segments[1]["start_time"] == 10.0
     assert segments[1]["end_time"] == 15.0
 
+
+def test_parse_transcript_text_standalone_seconds_label():
+    from app.services.youtube import parse_transcript_text
+
+    raw = """40segundosYes.AndforEnglishlearners,it'stheperfectplacetopracticespeakingbecausetheconversationsareshort,right?Youdon'tneedahugevocabulary.
+1 minuto e 5 segundosSecond phrase."""
+
+    segments = parse_transcript_text(raw)
+    assert len(segments) == 2
+    assert segments[0]["start_time"] == 40.0
+    assert segments[0]["end_time"] <= 65.0
+    assert "40segundos" not in segments[0]["text"]
+    assert "40 segundos" not in segments[0]["text"]
+    assert segments[0]["text"].startswith("Yes.")
+
+    assert segments[1]["start_time"] == 65.0
+    assert "minuto" not in segments[1]["text"]
+    assert segments[1]["text"] == "Second phrase."
+
+

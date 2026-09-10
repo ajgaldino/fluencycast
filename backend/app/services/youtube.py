@@ -211,7 +211,7 @@ def segment_transcript(raw_items: List[Dict[str, Any]], max_gap_seconds: float =
 
 def clean_transcript_token(text: str) -> str:
     """
-    Cleans HTML entities, tags, speaker markers and sound brackets.
+    Cleans HTML entities, tags, speaker markers, sound brackets, residual timestamps and labels.
     """
     if not text:
         return ""
@@ -236,6 +236,15 @@ def clean_transcript_token(text: str) -> str:
     text = text.replace('♪', ' ').replace('♫', ' ')
     # Remove speaker arrows like >> or >>>
     text = re.sub(r'^(?:>>|>>>|\>)\s*', '', text)
+    # Strip any leading residual timestamp or duration e.g. "40segundos", "0:40", "0:4040segundos", "8 segundos"
+    text = re.sub(
+        r'^(?:(?:(?:\d{1,2}:)?\d{1,2}:\d{2})|\d+)\s*(?:segundos?|seconds?|minutos?|minutes?|horas?|hours?|s|m)?(?:\s*(?:e|and)\s*\d+\s*(?:segundos?|seconds?))?\s*[-–:]?\s*',
+        '',
+        text,
+        flags=re.IGNORECASE
+    )
+    # Add space after punctuation if glued to word (e.g. "Yes.And" -> "Yes. And")
+    text = re.sub(r'([.?!,;:])([A-Za-z])', r'\1 \2', text)
     # Normalize whitespaces
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -340,6 +349,19 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
         re.IGNORECASE
     )
 
+    # Standalone label timestamp without mm:ss e.g. "40segundosYes", "40 segundos Yes", "1 minuto e 5 segundos Yes"
+    ts_label_only_re = re.compile(
+        r'^(?:'
+        r'(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e\s*)?)?'
+        r'(?:(\d+)\s*(?:minutos?|minutes?|min|m)\s*(?:e\s*)?)?'
+        r'(?:(\d+)\s*(?:segundos?|seconds?|seg|s))'
+        r'|'
+        r'(?:(?:(\d+)\s*(?:horas?|hours?|h)\s*(?:e\s*)?)?'
+        r'(\d+)\s*(?:minutos?|minutes?|min|m))'
+        r')\s*(.*)$',
+        re.IGNORECASE
+    )
+
     raw_entries = []  # tuples: (start_time, text_chunk)
     curr_time = None
     curr_text = []
@@ -362,6 +384,25 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
             curr_time = parse_time_str(m_start.group(1))
             rest = m_start.group(2) if len(m_start.groups()) >= 2 else ""
             rest = accessibility_label_re.sub('', rest).strip()
+            rest_clean = clean_transcript_token(rest)
+            if rest_clean:
+                curr_text.append(rest_clean)
+            continue
+
+        # Try standalone duration label e.g. '40segundosYes...'
+        m_label = ts_label_only_re.match(line)
+        if m_label:
+            if curr_time is not None and curr_text:
+                joined = clean_transcript_token(' '.join(curr_text))
+                if joined:
+                    raw_entries.append((curr_time, joined))
+                curr_text = []
+
+            h = int(m_label.group(1) or m_label.group(4) or 0)
+            mins = int(m_label.group(2) or m_label.group(5) or 0)
+            secs = int(m_label.group(3) or 0)
+            curr_time = float(h * 3600 + mins * 60 + secs)
+            rest = m_label.group(6) or ""
             rest_clean = clean_transcript_token(rest)
             if rest_clean:
                 curr_text.append(rest_clean)
