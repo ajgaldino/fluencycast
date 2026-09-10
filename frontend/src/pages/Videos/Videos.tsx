@@ -316,10 +316,13 @@ export const Videos: React.FC = () => {
           {/* Ready Step */}
           {step === 'ready' && createdVideo && (
             <div style={{ padding: '0.5rem 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'var(--accent-emerald)', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'var(--accent-emerald)', marginBottom: '0.4rem' }}>
                 <CheckCircle2 size={24} />
-                <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>Lição pronta para estudo!</span>
+                <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>Lição e Flashcards prontos!</span>
               </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem', marginBottom: '1.1rem' }}>
+                ✨ As palavras-chave deste vídeo foram extraídas e adicionadas automaticamente aos seus <strong>Flashcards</strong> para você aprender antes de ouvi-lo.
+              </p>
 
               <div className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.25rem', background: 'var(--bg-glass)' }}>
                 {createdVideo.thumbnail_url && (
@@ -335,15 +338,23 @@ export const Videos: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button onClick={resetModal} className="btn btn-secondary">
                   Fechar
+                </button>
+                <button
+                  onClick={() => navigate(`/reviews?video_id=${createdVideo.id}&mode=WORD`)}
+                  className="btn btn-secondary"
+                  style={{ borderColor: 'var(--primary)', color: 'var(--primary-light)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <Sparkles size={15} />
+                  <span>Estudar Palavras-chave</span>
                 </button>
                 <button
                   onClick={() => navigate(`/videos/${createdVideo.id}`)}
                   className="btn btn-primary"
                 >
-                  <span>Começar a Estudar</span>
+                  <span>Assistir Lição</span>
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -450,6 +461,27 @@ export const Videos: React.FC = () => {
                     {video.channel || 'YouTube'} • {video.category === 'music' ? '🎵 Música' : '🎬 Vídeo'}
                   </div>
                 </div>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/reviews?video_id=${video.id}&mode=WORD`);
+                  }}
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '0.35rem 0.65rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    flexShrink: 0
+                  }}
+                  title="Estudar vocabulário deste vídeo nos Flashcards"
+                >
+                  <Sparkles size={13} color="var(--primary)" />
+                  <span>Flashcards</span>
+                </button>
+
                 <button
                   onClick={(e) => handleDelete(video.id, e)}
                   style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.5rem' }}

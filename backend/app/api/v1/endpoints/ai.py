@@ -1,13 +1,28 @@
+import io
 import re
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+import edge_tts
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from app.api.deps import get_current_user
 from app.models.user import User
 
 router = APIRouter()
+
+# In-memory neural TTS audio cache (text -> mp3 bytes) for instant zero-latency repeat playback
+_TTS_CACHE: Dict[str, bytes] = {}
+
+VOICE_MAP = {
+    "male": "en-US-ChristopherNeural",
+    "female": "en-US-JennyNeural",
+    "guy": "en-US-GuyNeural",
+    "ava": "en-US-AvaNeural",
+    "british_male": "en-GB-RyanNeural",
+    "british_female": "en-GB-SoniaNeural",
+}
 
 # In-memory translation cache to guarantee instant responses and avoid rate limits
 _TRANSLATION_CACHE: Dict[str, str] = {}
@@ -31,6 +46,16 @@ class ExplainResponse(BaseModel):
     sentence: str
     explanation: str
     examples: list[str]
+
+
+class ExampleRequest(BaseModel):
+    text: str
+
+
+class ExampleResponse(BaseModel):
+    original: str
+    example: str
+    translation: str = ""
 
 
 CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
@@ -210,6 +235,84 @@ def explain_text(
     )
 
 
+@router.post("/example", response_model=ExampleResponse)
+def generate_example_sentence(
+    payload: ExampleRequest,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Generates a natural, real-world conversational example sentence for a given word or expression.
+    Uses multi-stage fallback:
+    1. Google Dictionary / Oxford real native sentences
+    2. Tatoeba human-curated sentence database
+    3. Built-in Core Dictionary tips
+    4. Contextual conversational smart synthesizer
+    """
+    term = payload.text.strip()
+    if not term:
+        return ExampleResponse(original="", example="", translation="")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+
+    # Strategy 1: Google Chrome Oxford Dictionary example
+    try:
+        url = f"https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=en&tl=pt&dt=ex&dt=md&q={urllib.parse.quote(term)}"
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, list):
+                        for sub in item:
+                            if isinstance(sub, list) and len(sub) > 1 and isinstance(sub[1], list):
+                                for def_item in sub[1]:
+                                    if isinstance(def_item, list) and len(def_item) > 2 and isinstance(def_item[2], str):
+                                        candidate = def_item[2].strip()
+                                        if candidate and len(candidate) > 10:
+                                            sentence = candidate[0].upper() + candidate[1:]
+                                            if not sentence.endswith((".", "!", "?")):
+                                                sentence += "."
+                                            return ExampleResponse(original=term, example=sentence)
+    except Exception as e:
+        print(f"Example Strategy 1 error: {e}")
+
+    # Strategy 2: Tatoeba API
+    try:
+        url = f"https://tatoeba.org/en/api_v0/search?from=eng&query={urllib.parse.quote(term)}"
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            for r in results:
+                txt = r.get("text", "").strip()
+                if txt and term.lower() in txt.lower() and len(txt) >= 12:
+                    return ExampleResponse(original=term, example=txt)
+    except Exception as e:
+        print(f"Example Strategy 2 error: {e}")
+
+    # Strategy 3: Built-in Core Dictionary tips
+    clean_w = re.sub(r'[^a-zA-Z]', '', term.lower())
+    if clean_w in CORE_DICTIONARY:
+        tip = CORE_DICTIONARY[clean_w].get("tip", "")
+        quote_match = re.search(r"['\"]([^'\"]+)['\"]", tip)
+        if quote_match:
+            ex = quote_match.group(1).strip()
+            if len(ex) > 8:
+                sentence = ex[0].upper() + ex[1:]
+                if not sentence.endswith((".", "!", "?")):
+                    sentence += "."
+                return ExampleResponse(original=term, example=sentence)
+
+    # Strategy 4: High quality conversational patterns
+    if " " in term:
+        sentence = f"In conversational English, native speakers frequently say '{term}'."
+    else:
+        sentence = f"Learning how to use '{term}' properly will significantly improve your fluency."
+
+    return ExampleResponse(original=term, example=sentence)
+
+
 class WordInfoRequest(BaseModel):
     word: str
     context: str | None = None
@@ -335,4 +438,64 @@ def chat_with_tutor(
         )
 
     return ChatResponse(reply=reply)
+
+
+@router.get("/tts")
+async def text_to_speech(
+    text: str = Query(..., description="The English phrase or word to synthesize"),
+    voice: Optional[str] = Query("male", description="Voice ID or shortcut: male, female, guy, ava, british_male, british_female"),
+    rate: Optional[str] = Query("+0%", description="Speech speed adjustment: +0%, -10%, +10%"),
+):
+    """
+    Synthesize natural, human-grade native English speech audio using Azure Neural TTS.
+    Returns audio/mpeg directly for instant browser HTML5 playback.
+    """
+    clean_text = text.strip()
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    # Resolve voice name
+    resolved_voice = VOICE_MAP.get((voice or "").lower().strip(), voice) or "en-US-ChristopherNeural"
+    clean_rate = rate.strip() if rate else "+0%"
+
+    cache_key = f"{resolved_voice}_{clean_rate}_{clean_text.lower()}"
+    if cache_key in _TTS_CACHE:
+        return Response(
+            content=_TTS_CACHE[cache_key],
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "X-TTS-Source": "cache"
+            }
+        )
+
+    try:
+        communicate = edge_tts.Communicate(clean_text, resolved_voice, rate=clean_rate)
+        audio_stream = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_stream.write(chunk["data"])
+
+        audio_bytes = audio_stream.getvalue()
+        if not audio_bytes:
+            raise ValueError("TTS engine produced empty audio stream.")
+
+        # Cache up to 1000 items in memory
+        if len(_TTS_CACHE) < 1000:
+            _TTS_CACHE[cache_key] = audio_bytes
+
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "X-TTS-Source": "neural"
+            }
+        )
+    except Exception as e:
+        print(f"Neural TTS generation notice: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS generation error: {str(e)}")
+
 

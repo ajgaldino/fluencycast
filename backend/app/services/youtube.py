@@ -209,62 +209,17 @@ def segment_transcript(raw_items: List[Dict[str, Any]], max_gap_seconds: float =
     return segmented
 
 
-def split_segment_into_sentences(text: str, start: float, end: float, max_words: int = 12) -> List[Dict[str, Any]]:
-    """
-    Fragments long sentences and multi-sentence blocks into bite-sized, readable phrases
-    with accurately calculated proportional timestamps.
-    """
-    text = clean_text(text)
-    if not text:
-        return []
-
-    # Split by end of sentence punctuation (. ! ?)
-    raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
-    if not raw_sentences:
-        raw_sentences = [text]
-
-    final_pieces = []
-    for s in raw_sentences:
-        words = s.split()
-        if len(words) > max_words:
-            # Try splitting by comma, semicolon, or dash
-            subparts = [p.strip() for p in re.split(r'(?<=[,;—])\s+', s) if p.strip()]
-            if len(subparts) > 1 and all(len(p.split()) <= max_words + 4 for p in subparts):
-                final_pieces.extend(subparts)
-            else:
-                final_pieces.append(s)
-        else:
-            final_pieces.append(s)
-
-    total_len = sum(len(p) for p in final_pieces) or 1
-    total_dur = max(0.6, end - start)
-
-    results = []
-    curr_start = start
-    for p in final_pieces:
-        p_dur = (len(p) / total_len) * total_dur
-        p_end = curr_start + p_dur
-        results.append({
-            "text": p,
-            "start_time": round(curr_start, 2),
-            "end_time": round(p_end, 2)
-        })
-        curr_start = p_end
-
-    return results
-
-
 def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
     """
-    Parses manually pasted transcript text into structured, bite-sized segments:
-    - Supports timestamped lines like '0:12 Some sentence' or '0:12\\nSome sentence'
-    - Automatically fragments long multi-sentence paragraphs into concise phrases
+    Parses manually pasted transcript text into structured segments:
+    - Supports timestamped lines like '0:12 Some sentence' or '0:12\nSome sentence'
+    - Supports plain text (lyrics / sentences without timestamps)
     """
     if not text or not text.strip():
         return []
 
     lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
-    raw_blocks = []
+    segments = []
 
     has_timestamps = any(re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', line) for line in lines)
 
@@ -280,7 +235,7 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
 
             if m_inline:
                 if curr_time is not None and curr_text:
-                    raw_blocks.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
                     curr_text = []
                 h = int(m_inline.group(1) or 0)
                 m_ = int(m_inline.group(2))
@@ -289,7 +244,7 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
                 curr_text = [m_inline.group(4)]
             elif m_alone:
                 if curr_time is not None and curr_text:
-                    raw_blocks.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+                    segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
                     curr_text = []
                 h = int(m_alone.group(1) or 0)
                 m_ = int(m_alone.group(2))
@@ -300,36 +255,28 @@ def parse_transcript_text(text: str) -> List[Dict[str, Any]]:
                     curr_text.append(line)
 
         if curr_time is not None and curr_text:
-            raw_blocks.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
+            segments.append({'start': curr_time, 'text': ' '.join(curr_text).strip()})
 
-        for i in range(len(raw_blocks)):
-            end = raw_blocks[i + 1]['start'] if i + 1 < len(raw_blocks) else raw_blocks[i]['start'] + 4.0
-            raw_blocks[i]['end'] = round(max(end, raw_blocks[i]['start'] + 1.0), 2)
-
-        # Now fragment raw blocks into concise, bite-sized sentences
-        fragmented = []
-        for block in raw_blocks:
-            sub_pieces = split_segment_into_sentences(block['text'], block['start'], block['end'])
-            fragmented.extend(sub_pieces)
-
-        for i, item in enumerate(fragmented):
-            item['sequence'] = i + 1
-
-        return fragmented
+        for i in range(len(segments)):
+            end = segments[i + 1]['start'] if i + 1 < len(segments) else segments[i]['start'] + 4.0
+            segments[i]['end'] = round(max(end, segments[i]['start'] + 1.0), 2)
+            segments[i]['sequence'] = i + 1
+            segments[i]['start_time'] = float(segments[i]['start'])
+            segments[i]['end_time'] = float(segments[i]['end'])
     else:
         # Plain text without timestamps
         start = 0.0
-        fragmented = []
-        for line in lines:
+        for i, line in enumerate(lines):
             dur = max(2.5, len(line.split()) * 0.45)
-            end = start + dur
-            sub_pieces = split_segment_into_sentences(line, start, end)
-            fragmented.extend(sub_pieces)
-            start = end
+            segments.append({
+                'sequence': i + 1,
+                'start_time': round(start, 2),
+                'end_time': round(start + dur, 2),
+                'text': line
+            })
+            start += dur
 
-        for i, item in enumerate(fragmented):
-            item['sequence'] = i + 1
+    return segments
 
-        return fragmented
 
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { phraseService, UpdatePhrasePayload } from '../../services/phrases';
 import { aiService } from '../../services/ai';
+import { speechService } from '../../services/speech';
 import { SavedPhrase } from '../../types/phrase';
 import {
   Bookmark,
@@ -19,14 +20,20 @@ import {
   CheckCircle,
   PlusCircle,
   Plus,
-  RefreshCw
+  RefreshCw,
+  Film
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { videoService } from '../../services/videos';
+import { Video } from '../../types/video';
 
 export const Phrases: React.FC = () => {
   const [phrases, setPhrases] = useState<SavedPhrase[]>([]);
   // Main view tab: 'SENTENCE' (Frases) vs 'WORD' (Palavras)
   const [activeTab, setActiveTab] = useState<'SENTENCE' | 'WORD'>('SENTENCE');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [selectedVideoId, setSelectedVideoId] = useState<string>('ALL');
+  const [videosList, setVideosList] = useState<Video[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [extractingWords, setExtractingWords] = useState(false);
@@ -45,6 +52,7 @@ export const Phrases: React.FC = () => {
   const [createDifficulty, setCreateDifficulty] = useState<string>('NORMAL');
   const [savingCreate, setSavingCreate] = useState(false);
   const [aiTranslatingCreate, setAiTranslatingCreate] = useState(false);
+  const [aiGeneratingExampleCreate, setAiGeneratingExampleCreate] = useState(false);
 
   // Editing state
   const [editingPhrase, setEditingPhrase] = useState<SavedPhrase | null>(null);
@@ -55,16 +63,30 @@ export const Phrases: React.FC = () => {
   const [editStatus, setEditStatus] = useState<string>('NEW');
   const [savingEdit, setSavingEdit] = useState(false);
   const [aiTranslatingEdit, setAiTranslatingEdit] = useState(false);
+  const [aiGeneratingExampleEdit, setAiGeneratingExampleEdit] = useState(false);
+
+  useEffect(() => {
+    const fetchVideos = async () => {
+      try {
+        const vList = await videoService.getVideos();
+        setVideosList(vList);
+      } catch (e) {
+        console.error('Failed to load videos:', e);
+      }
+    };
+    fetchVideos();
+  }, []);
 
   useEffect(() => {
     loadPhrases();
-  }, [statusFilter]);
+  }, [statusFilter, selectedVideoId]);
 
   const loadPhrases = async () => {
     setLoading(true);
     try {
-      // Load all phrases (both sentences and words) so tab counts are immediately known
-      const data = await phraseService.getPhrases(statusFilter === 'ALL' ? undefined : statusFilter);
+      // Load all phrases filtered by video if selected
+      const vId = selectedVideoId !== 'ALL' ? selectedVideoId : undefined;
+      const data = await phraseService.getPhrases(statusFilter === 'ALL' ? undefined : statusFilter, undefined, vId);
       setPhrases(data);
     } catch (err) {
       console.error(err);
@@ -73,18 +95,19 @@ export const Phrases: React.FC = () => {
     }
   };
 
-  // Extract vocabulary words from saved phrases
+  // Extract vocabulary words from saved phrases or directly from video transcript
   const handleExtractWords = async () => {
     try {
       setExtractingWords(true);
       setExtractionMessage(null);
-      const newWords = await phraseService.extractWords();
+      const vId = selectedVideoId !== 'ALL' ? selectedVideoId : undefined;
+      const newWords = await phraseService.extractWords(vId);
       await loadPhrases();
       if (newWords.length > 0) {
-        setExtractionMessage(`🎉 ${newWords.length} novas palavras-chave extraídas das suas frases!`);
+        setExtractionMessage(`🎉 ${newWords.length} novas palavras-chave extraídas para o seu vocabulário!`);
         setActiveTab('WORD');
       } else {
-        setExtractionMessage('Todas as palavras das suas frases já foram extraídas para o seu vocabulário.');
+        setExtractionMessage('Todas as palavras deste vídeo já foram extraídas para o seu vocabulário.');
       }
     } catch (err: any) {
       alert(err.message || 'Falha ao extrair palavras.');
@@ -97,15 +120,10 @@ export const Phrases: React.FC = () => {
     setVisibleTranslations((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  // Native Speech Synthesis audio
+  // Natural Native Audio Speech
   const handleSpeak = (text: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+    speechService.speak(text);
   };
 
   // Quick 1-click Auto Translate on Card
@@ -147,10 +165,45 @@ export const Phrases: React.FC = () => {
       if (res.translation && res.translation.toLowerCase() !== query.toLowerCase()) {
         setCreateTranslation(res.translation);
       }
+      // If it's a word and context is empty, also generate an example sentence for maximum convenience
+      if (createType === 'WORD' && !createContext.trim()) {
+        try {
+          const exRes = await aiService.generateExample(query);
+          if (exRes.example) {
+            setCreateContext(exRes.example);
+          }
+        } catch {
+          // ignore secondary example generation failure
+        }
+      }
     } catch (err) {
       alert('Não foi possível obter a tradução com IA no momento.');
     } finally {
       setAiTranslatingCreate(false);
+    }
+  };
+
+  // AI Generate Example Sentence inside Create Modal
+  const handleAiGenerateExampleCreate = async () => {
+    const query = createText.trim();
+    if (!query) {
+      alert(`Por favor, digite primeiro a ${createType === 'WORD' ? 'palavra' : 'frase'} em inglês.`);
+      return;
+    }
+    try {
+      setAiGeneratingExampleCreate(true);
+      const res = await aiService.generateExample(query);
+      if (res.example) {
+        setCreateContext(res.example);
+      }
+      // If translation is empty, also fill translation if returned
+      if (!createTranslation.trim() && res.translation) {
+        setCreateTranslation(res.translation);
+      }
+    } catch (err) {
+      alert('Não foi possível gerar um exemplo com IA no momento.');
+    } finally {
+      setAiGeneratingExampleCreate(false);
     }
   };
 
@@ -178,10 +231,23 @@ export const Phrases: React.FC = () => {
         }
       }
 
+      let contextToSave = createContext.trim();
+      // If user added a word and left context empty, auto-generate authentic example sentence
+      if (!contextToSave && createType === 'WORD') {
+        try {
+          const exRes = await aiService.generateExample(cleanText);
+          if (exRes.example) {
+            contextToSave = exRes.example;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
       const created = await phraseService.savePhrase({
         text: cleanText,
         translation: translationToSave || null,
-        context_sentence: createContext.trim() || null,
+        context_sentence: contextToSave || null,
         phrase_type: createType,
         difficulty: createDifficulty,
         status: 'NEW',
@@ -239,6 +305,26 @@ export const Phrases: React.FC = () => {
       alert('Não foi possível obter a tradução no momento.');
     } finally {
       setAiTranslatingEdit(false);
+    }
+  };
+
+  // AI Generate Example Sentence inside Edit Modal
+  const handleAiGenerateExampleEdit = async () => {
+    const query = editText.trim();
+    if (!query) {
+      alert('Por favor, digite primeiro o texto em inglês.');
+      return;
+    }
+    try {
+      setAiGeneratingExampleEdit(true);
+      const res = await aiService.generateExample(query);
+      if (res.example) {
+        setEditContext(res.example);
+      }
+    } catch (err) {
+      alert('Não foi possível gerar um exemplo com IA no momento.');
+    } finally {
+      setAiGeneratingExampleEdit(false);
     }
   };
 
@@ -517,24 +603,110 @@ export const Phrases: React.FC = () => {
         )}
       </div>
 
-      {/* Filter Status Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.5rem', marginBottom: '1.25rem' }}>
-        {[
-          { label: 'Todas', value: 'ALL' },
-          { label: 'Novas', value: 'NEW' },
-          { label: 'Em Revisão', value: 'REVIEW' },
-          { label: 'Dominadas', value: 'MASTERED' },
-        ].map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusFilter(tab.value)}
-            className={`btn ${statusFilter === tab.value ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ padding: '0.45rem 0.9rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+      {/* Video Filter & Status Filter Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '0.75rem',
+        flexWrap: 'wrap',
+        marginBottom: '1.25rem'
+      }}>
+        {/* Filter Status Tabs */}
+        <div style={{ display: 'flex', gap: '0.4rem', overflowX: 'auto', paddingBottom: '0.2rem' }}>
+          {[
+            { label: 'Todas', value: 'ALL' },
+            { label: 'Novas', value: 'NEW' },
+            { label: 'Em Revisão', value: 'REVIEW' },
+            { label: 'Dominadas', value: 'MASTERED' },
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setStatusFilter(tab.value)}
+              className={`btn ${statusFilter === tab.value ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Video Selector Dropdown */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px', flex: '1', maxWidth: '380px' }}>
+          <Film size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
+          <select
+            value={selectedVideoId}
+            onChange={(e) => setSelectedVideoId(e.target.value)}
+            className="form-input"
+            style={{ padding: '0.35rem 0.6rem', fontSize: '0.82rem', height: 'auto', cursor: 'pointer' }}
           >
-            {tab.label}
-          </button>
-        ))}
+            <option value="ALL">🌐 Todos os vídeos (sem distinção)</option>
+            {videosList.map((v) => (
+              <option key={v.id} value={v.id}>
+                🎬 {v.title.length > 42 ? v.title.slice(0, 42) + '...' : v.title}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {/* Active Video Shortcut Banner in Library */}
+      {selectedVideoId !== 'ALL' && (() => {
+        const activeVideo = videosList.find((v) => v.id === selectedVideoId);
+        if (!activeVideo) return null;
+        return (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(6, 182, 212, 0.1) 100%)',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.6rem 0.85rem',
+            marginBottom: '1.25rem',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
+              {activeVideo.thumbnail_url && (
+                <img
+                  src={activeVideo.thumbnail_url}
+                  alt={activeVideo.title}
+                  style={{ width: '48px', height: '30px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
+                />
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {activeVideo.title}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  Visualizando vocabulário filtrado deste vídeo ({filteredItems.length} itens)
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+              <Link
+                to={`/reviews?video_id=${activeVideo.id}&mode=WORD`}
+                className="btn btn-primary"
+                style={{ fontSize: '0.74rem', padding: '0.3rem 0.65rem' }}
+                title="Estudar flashcards deste vídeo"
+              >
+                <span>🃏 Estudar Flashcards</span>
+              </Link>
+              <button
+                onClick={handleExtractWords}
+                disabled={extractingWords}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.74rem', padding: '0.3rem 0.65rem' }}
+                title="Extrair palavras-chave da transcrição"
+              >
+                {extractingWords ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} color="var(--accent-cyan)" />}
+                <span>Re-extrair Palavras</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Content Rendering */}
       {loading ? (
@@ -835,15 +1007,41 @@ export const Phrases: React.FC = () => {
 
             {/* Context */}
             <div className="form-group">
-              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                Contexto / Exemplo adicional (opcional):
-              </label>
+              <div className="flex-between" style={{ marginBottom: '0.35rem' }}>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>
+                  {editingPhrase.phrase_type === 'WORD' ? 'Frase de Exemplo ou Contexto (opcional):' : 'Contexto / Exemplo adicional (opcional):'}
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAiGenerateExampleEdit}
+                  disabled={aiGeneratingExampleEdit || !editText.trim()}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: editText.trim() ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                    cursor: editText.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 600
+                  }}
+                  title="Gerar automaticamente uma frase de exemplo contextual com IA"
+                >
+                  {aiGeneratingExampleEdit ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  <span>⚡ Gerar Exemplo com IA</span>
+                </button>
+              </div>
               <input
                 type="text"
                 className="form-input"
                 value={editContext}
                 onChange={(e) => setEditContext(e.target.value)}
-                placeholder="Ex: Frase de contexto..."
+                placeholder={editingPhrase.phrase_type === 'WORD' ? 'Ex: She is resilient in the face of challenges.' : 'Ex: Frase de contexto...'}
               />
             </div>
 
@@ -1068,9 +1266,35 @@ export const Phrases: React.FC = () => {
 
             {/* Context / Example Sentence */}
             <div className="form-group">
-              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                {createType === 'WORD' ? 'Frase de Exemplo ou Contexto (opcional):' : 'Notas ou Contexto Adicional (opcional):'}
-              </label>
+              <div className="flex-between" style={{ marginBottom: '0.35rem' }}>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>
+                  {createType === 'WORD' ? 'Frase de Exemplo ou Contexto (opcional):' : 'Notas ou Contexto Adicional (opcional):'}
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAiGenerateExampleCreate}
+                  disabled={aiGeneratingExampleCreate || !createText.trim()}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: createText.trim() ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                    cursor: createText.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 600
+                  }}
+                  title="Gerar automaticamente uma frase de exemplo real em inglês usando IA"
+                >
+                  {aiGeneratingExampleCreate ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  <span>⚡ Gerar Exemplo com IA</span>
+                </button>
+              </div>
               <input
                 type="text"
                 className="form-input"
@@ -1078,6 +1302,11 @@ export const Phrases: React.FC = () => {
                 onChange={(e) => setCreateContext(e.target.value)}
                 placeholder={createType === 'WORD' ? 'Ex: She is resilient in the face of challenges.' : 'Ex: Ouvido em uma conversa informal...'}
               />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                {createType === 'WORD'
+                  ? 'Dica: Clique em "⚡ Gerar Exemplo com IA" para a IA criar uma frase real em inglês com esta palavra.'
+                  : 'Dica: Opcional, use para anotar onde você ouviu a frase.'}
+              </span>
             </div>
 
             {/* Initial Difficulty Selector */}

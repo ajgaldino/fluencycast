@@ -12,10 +12,13 @@ from app.schemas.phrase import SavedPhraseCreate, SavedPhraseUpdate, SavedPhrase
 router = APIRouter()
 
 
+from app.services.vocabulary import extract_keywords_for_video, get_video_filter_condition
+
 @router.get("/", response_model=List[SavedPhraseResponse])
 def get_saved_phrases(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    video_id: Optional[str] = Query(None, description="Filter by video ID"),
     status: Optional[str] = Query(None, description="Filter by status: NEW, LEARNING, REVIEW, MASTERED"),
     phrase_type: Optional[str] = Query(None, description="Filter by phrase_type: SENTENCE, WORD, etc."),
     skip: int = 0,
@@ -23,12 +26,14 @@ def get_saved_phrases(
 ) -> Any:
     """
     Retrieve all saved phrases for the current user.
-    Supports filtering by status and phrase_type (SENTENCE vs WORD).
+    Supports filtering by video_id, status and phrase_type (SENTENCE vs WORD).
     """
     query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
+    if video_id and video_id.strip() and video_id.upper() != "ALL":
+        query = query.filter(get_video_filter_condition(video_id, current_user.id, db))
     if status:
         query = query.filter(SavedPhrase.status == status.upper())
-    if phrase_type:
+    if phrase_type and phrase_type.upper() != "ALL":
         p_type = phrase_type.upper()
         if p_type == "SENTENCE":
             query = query.filter(func.upper(SavedPhrase.phrase_type) != "WORD")
@@ -45,7 +50,7 @@ def create_saved_phrase(
 ) -> Any:
     """
     Save a new phrase manually or from a video segment.
-    Prevents duplicate WORD cards for the same user while keeping them updated.
+    Prevents duplicate WORD cards across DIFFERENT videos for the same user while keeping them updated.
     """
     clean_text = phrase_in.text.strip()
     if not clean_text:
@@ -56,13 +61,14 @@ def create_saved_phrase(
 
     p_type = (phrase_in.phrase_type or "SENTENCE").upper()
 
-    # Deduplicate single words: if already exists, update translation/context and return
+    # Deduplicate single words across all videos for this user
     if p_type == "WORD":
-        existing = db.query(SavedPhrase).filter(
+        dedup_query = db.query(SavedPhrase).filter(
             SavedPhrase.user_id == current_user.id,
             func.upper(SavedPhrase.phrase_type) == "WORD",
             func.lower(SavedPhrase.text) == clean_text.lower()
-        ).first()
+        )
+        existing = dedup_query.first()
         if existing:
             updated = False
             if not existing.translation and phrase_in.translation:
@@ -70,6 +76,11 @@ def create_saved_phrase(
                 updated = True
             if not existing.context_sentence and phrase_in.context_sentence:
                 existing.context_sentence = phrase_in.context_sentence
+                updated = True
+            if not existing.video_id and phrase_in.video_id:
+                existing.video_id = phrase_in.video_id
+                existing.transcript_segment_id = phrase_in.transcript_segment_id
+                existing.timestamp = phrase_in.timestamp
                 updated = True
             if updated:
                 db.commit()
@@ -126,17 +137,17 @@ def extract_words_from_phrases(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Extracts key vocabulary words from saved phrases and creates dedicated WORD flashcards
-    with sentence context and automatic Portuguese translation.
-    Strictly avoids duplicate words (case-insensitive deduplication).
+    Extracts key vocabulary words into dedicated WORD flashcards.
+    If video_id is provided, extracts directly from the video's transcript segments.
+    Otherwise, extracts from saved phrases.
     """
+    if video_id and video_id.strip() and video_id.upper() != "ALL":
+        return extract_keywords_for_video(video_id, current_user.id, db)
+
     import re
     from app.api.v1.endpoints.ai import translate_text, TranslateRequest, CORE_DICTIONARY
 
     query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
-    if video_id:
-        query = query.filter(SavedPhrase.video_id == video_id)
-
     saved_sentences = query.filter(func.upper(SavedPhrase.phrase_type) != "WORD").all()
     if not saved_sentences:
         saved_sentences = query.all()

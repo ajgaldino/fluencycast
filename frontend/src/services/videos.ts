@@ -17,9 +17,16 @@ export const videoService = {
     });
   },
 
+  async extractKeywords(videoId: string): Promise<any[]> {
+    return request<any[]>(`/videos/${videoId}/extract-keywords`, {
+      method: 'POST',
+    });
+  },
+
   async deleteVideo(id: string): Promise<void> {
     return request<void>(`/videos/${id}`, {
       method: 'DELETE',
     });
   },
 };
+

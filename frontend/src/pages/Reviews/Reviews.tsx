@@ -4,6 +4,7 @@ import { phraseService, UpdatePhrasePayload } from '../../services/phrases';
 import { aiService } from '../../services/ai';
 import { SavedPhrase } from '../../types/phrase';
 import { sfx } from '../../utils/audioEffects';
+import { speechService } from '../../services/speech';
 import './Reviews.css';
 import {
   BrainCircuit,
@@ -27,13 +28,23 @@ import {
   RefreshCw,
   Layers,
   HelpCircle,
-  Lightbulb
+  Lightbulb,
+  Film
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { videoService } from '../../services/videos';
+import { Video } from '../../types/video';
 
 export const Reviews: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlVideoId = searchParams.get('video_id') || 'ALL';
+  const urlMode = (searchParams.get('mode') as 'SENTENCE' | 'WORD' | 'REVERSE') || null;
+
   // Deck Type: Sentences vs Words vs Reverse
-  const [reviewMode, setReviewMode] = useState<'SENTENCE' | 'WORD' | 'REVERSE'>('SENTENCE');
+  const [reviewMode, setReviewMode] = useState<'SENTENCE' | 'WORD' | 'REVERSE'>(urlMode || 'SENTENCE');
+  // Video Filter: 'ALL' or specific video ID
+  const [selectedVideoId, setSelectedVideoId] = useState<string>(urlVideoId);
+  const [videosList, setVideosList] = useState<Video[]>([]);
   // Study Method: Multiple Choice (Simpler/Memrise) as default vs Classic Flashcard vs Type-to-Answer
   const [studyMethod, setStudyMethod] = useState<'CHOICE' | 'FLASHCARD' | 'TYPE'>('CHOICE');
   // Review Scope: 'DUE' (somente agendadas/disponíveis) vs 'ALL' (todas as salvas/prática livre)
@@ -57,6 +68,8 @@ export const Reviews: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [autoPronounce, setAutoPronounce] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('male');
+  const [voiceSpeed, setVoiceSpeed] = useState<'normal' | 'slow'>('normal');
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Memrise Mem / Hint State
@@ -97,10 +110,26 @@ export const Reviews: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope);
-  }, [reviewMode, reviewScope]);
+    const fetchVideos = async () => {
+      try {
+        const list = await videoService.getVideos();
+        setVideosList(list);
+      } catch (e) {
+        console.error('Failed to load videos for review filter:', e);
+      }
+    };
+    fetchVideos();
+  }, []);
 
-  const loadReviews = async (mode: 'SENTENCE' | 'WORD', scope: 'DUE' | 'ALL' = reviewScope) => {
+  useEffect(() => {
+    loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope, selectedVideoId);
+  }, [reviewMode, reviewScope, selectedVideoId]);
+
+  const loadReviews = async (
+    mode: 'SENTENCE' | 'WORD',
+    scope: 'DUE' | 'ALL' = reviewScope,
+    videoId: string = selectedVideoId
+  ) => {
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
       autoAdvanceTimerRef.current = null;
@@ -120,10 +149,11 @@ export const Reviews: React.FC = () => {
     setChoiceResult(null);
     try {
       const isAll = scope === 'ALL';
+      const vId = videoId !== 'ALL' ? videoId : undefined;
       const [data, dueData, allData] = await Promise.all([
-        reviewService.getTodayReviews(mode, isAll),
-        reviewService.getTodayReviews(mode, false),
-        reviewService.getTodayReviews(mode, true),
+        reviewService.getTodayReviews(mode, isAll, vId),
+        reviewService.getTodayReviews(mode, false, vId),
+        reviewService.getTodayReviews(mode, true, vId),
       ]);
       setPhrases(data);
       setDueCount(dueData.length);
@@ -132,6 +162,27 @@ export const Reviews: React.FC = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVideoFilterChange = (newVideoId: string) => {
+    setSelectedVideoId(newVideoId);
+    const params: Record<string, string> = {};
+    if (newVideoId !== 'ALL') params.video_id = newVideoId;
+    if (reviewMode !== 'SENTENCE') params.mode = reviewMode;
+    setSearchParams(params);
+  };
+
+  const handleExtractVideoKeywords = async () => {
+    if (selectedVideoId === 'ALL') return;
+    try {
+      setExtractingWords(true);
+      await videoService.extractKeywords(selectedVideoId);
+      await loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope, selectedVideoId);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao extrair palavras-chave do vídeo.');
+    } finally {
+      setExtractingWords(false);
     }
   };
 
@@ -485,19 +536,16 @@ export const Reviews: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showTranslation, currentPhrase, editingPhrase, phrases.length, currentIndex, studyMethod, selectedChoice, choiceOptions]);
 
-  const handleSpeak = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.88;
-      setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
-      // Safety timeout to reset wave animation
-      setTimeout(() => setIsSpeaking(false), 2200);
-    }
+  const handleSpeak = (text: string, forceSpeed?: 'normal' | 'slow') => {
+    if (!soundEnabled) return;
+    setIsSpeaking(true);
+    speechService.speak(text, {
+      voice: voiceGender,
+      speed: forceSpeed || voiceSpeed,
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
+    });
   };
 
   // Fuzzy comparison for Type-to-Answer
@@ -661,6 +709,85 @@ export const Reviews: React.FC = () => {
           </div>
         </div>
 
+        {/* Video Filter Selector Bar */}
+        <div className="video-deck-filter-bar">
+          <div className="video-filter-label">
+            <Film size={14} color="var(--primary)" />
+            <span>Filtrar por Vídeo:</span>
+          </div>
+          <div className="video-filter-select-wrapper">
+            <select
+              value={selectedVideoId}
+              onChange={(e) => handleVideoFilterChange(e.target.value)}
+              className="video-filter-select"
+            >
+              <option value="ALL">🌐 Todos os vídeos (sem distinção)</option>
+              {videosList.map((v) => (
+                <option key={v.id} value={v.id}>
+                  🎬 {v.title.length > 46 ? v.title.slice(0, 46) + '...' : v.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedVideoId !== 'ALL' && (
+            <button
+              onClick={() => handleVideoFilterChange('ALL')}
+              className="video-filter-reset-btn"
+              title="Ver todas as palavras sem distinção de vídeo"
+            >
+              <X size={12} />
+              <span>Ver Todos</span>
+            </button>
+          )}
+        </div>
+
+        {/* Active Video Context Banner */}
+        {selectedVideoId !== 'ALL' && (() => {
+          const activeVideo = videosList.find((v) => v.id === selectedVideoId);
+          if (!activeVideo) return null;
+          return (
+            <div className="active-video-study-banner">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
+                {activeVideo.thumbnail_url && (
+                  <img
+                    src={activeVideo.thumbnail_url}
+                    alt={activeVideo.title}
+                    style={{ width: '48px', height: '30px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
+                  />
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {activeVideo.title}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    Vocabulário deste vídeo ({allCount} cards)
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                <button
+                  onClick={handleExtractVideoKeywords}
+                  disabled={extractingWords}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
+                  title="Extrair ou atualizar palavras-chave deste vídeo"
+                >
+                  {extractingWords ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} color="var(--primary)" />}
+                  <span>Extrair Palavras</span>
+                </button>
+                <Link
+                  to={`/videos/${activeVideo.id}`}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
+                  title="Assistir com transcrição sincronizada"
+                >
+                  <span>Assistir</span>
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Scope Selector: Somente Agendadas (Disponíveis Hoje) vs Prática Livre (Todas) */}
         <div className="simpler-scope-selector">
           <button
@@ -803,11 +930,17 @@ export const Reviews: React.FC = () => {
             <CheckCircle2 size={42} color="var(--accent-emerald)" />
           </div>
           <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
-            {reviewScope === 'DUE' ? 'Tudo em dia para hoje! 🎉' : 'Nenhum card cadastrado'}
+            {reviewScope === 'DUE'
+              ? 'Tudo em dia para hoje! 🎉'
+              : selectedVideoId !== 'ALL'
+              ? 'Nenhum card neste vídeo ainda'
+              : 'Nenhum card cadastrado'}
           </h2>
           <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.92rem', lineHeight: 1.6, maxWidth: '440px', margin: '0 auto 1.5rem auto' }}>
             {reviewScope === 'DUE'
               ? `Você concluiu todas as revisões agendadas para hoje! Para acelerar ainda mais sua retenção, pratique livremente com todas as ${allCount} palavras e frases salvas.`
+              : selectedVideoId !== 'ALL'
+              ? 'Este vídeo ainda não possui palavras no seu deck. Clique abaixo para extrair automaticamente todas as palavras-chave do vídeo e aprender antes de ouvi-lo!'
               : effectiveMode === 'WORD'
               ? 'Você ainda não possui palavras salvas no vocabulário. Adicione manualmente na biblioteca ou extraia das suas frases salvas!'
               : 'Você ainda não salvou frases. Adicione manualmente na biblioteca ou assista a um vídeo para capturar novas expressões!'}
@@ -831,7 +964,28 @@ export const Reviews: React.FC = () => {
               </button>
             )}
 
-            {effectiveMode === 'WORD' && (
+            {selectedVideoId !== 'ALL' && (
+              <button
+                onClick={handleExtractVideoKeywords}
+                className="simpler-btn"
+                disabled={extractingWords}
+                style={{
+                  background: 'linear-gradient(135deg, #06b6d4 0%, #0284c7 100%)',
+                  color: '#ffffff',
+                  padding: '0.8rem 1rem',
+                  fontSize: '0.9rem'
+                }}
+              >
+                {extractingWords ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Sparkles size={16} />
+                )}
+                <span>✨ Extrair Palavras-chave deste Vídeo Agora</span>
+              </button>
+            )}
+
+            {effectiveMode === 'WORD' && selectedVideoId === 'ALL' && (
               <button
                 onClick={handleExtractWords}
                 className="btn btn-secondary"
@@ -1022,14 +1176,31 @@ export const Reviews: React.FC = () => {
                 </div>
               </div>
 
-              {/* Memrise Hero Audio Button */}
-              <div style={{ textAlign: 'center', margin: '0.6rem 0 0.4rem 0' }}>
+              {/* Natural Audio & Voice Controls */}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.6rem', margin: '0.6rem 0 0.4rem 0', flexWrap: 'wrap' }}>
                 <button
-                  onClick={() => handleSpeak(currentPhrase.text)}
+                  onClick={() => handleSpeak(currentPhrase.text, 'normal')}
                   className={`hero-audio-btn ${isSpeaking ? 'speaking' : ''}`}
-                  title="Ouvir pronúncia nativa em inglês (Atalho: R)"
+                  title="Ouvir pronúncia natural nativa em velocidade normal (Atalho: R)"
                 >
-                  <Volume2 size={26} />
+                  <Volume2 size={24} />
+                </button>
+                <button
+                  onClick={() => handleSpeak(currentPhrase.text, 'slow')}
+                  className="btn btn-secondary"
+                  style={{ borderRadius: '50px', padding: '0.35rem 0.75rem', fontSize: '0.78rem', gap: '0.3rem', border: '1px solid var(--border-subtle)' }}
+                  title="Ouvir pronúncia natural em câmera lenta para treinar cada fonema"
+                >
+                  <span>🐢</span>
+                  <span>Devagar</span>
+                </button>
+                <button
+                  onClick={() => setVoiceGender(voiceGender === 'male' ? 'female' : 'male')}
+                  className="btn btn-secondary"
+                  style={{ borderRadius: '50px', padding: '0.35rem 0.75rem', fontSize: '0.78rem', gap: '0.3rem', border: '1px solid var(--border-subtle)' }}
+                  title="Alternar entre voz natural masculina (Christopher) e feminina (Jenny)"
+                >
+                  <span>{voiceGender === 'male' ? '👨 Voz Masculina' : '👩 Voz Feminina'}</span>
                 </button>
               </div>
 

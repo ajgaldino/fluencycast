@@ -8,6 +8,7 @@ from app.models.user import User
 from app.models.video import Video
 from app.models.transcript import TranscriptSegment
 from app.schemas.video import VideoCreate, VideoResponse, VideoDetailResponse
+from app.schemas.phrase import SavedPhraseResponse
 from app.services.youtube import (
     extract_video_id,
     get_video_metadata,
@@ -15,6 +16,7 @@ from app.services.youtube import (
     segment_transcript,
     parse_transcript_text
 )
+from app.services.vocabulary import extract_keywords_for_video
 
 router = APIRouter()
 
@@ -49,10 +51,11 @@ def create_video(
     """
     Process and add a new YouTube video for study:
     1. Validate URL and extract video ID
-    2. Check if already added by this user (if so, return it)
+    2. Check if already added by this user (if so, return it and ensure keywords extracted)
     3. Fetch metadata (title, channel, thumbnail)
     4. Fetch transcript and segment into clean sentences
     5. Save video and segments in database
+    6. Automatically extract high-value vocabulary keywords into flashcards
     """
     try:
         video_id = extract_video_id(video_in.url)
@@ -66,6 +69,11 @@ def create_video(
         .first()
     )
     if existing:
+        # Check if existing video has keywords; if not, extract them
+        try:
+            extract_keywords_for_video(existing.id, current_user.id, db)
+        except Exception as e:
+            print(f"[Vocabulary] Error extracting keywords for existing video {existing.id}: {e}")
         return existing
 
     # 1. Fetch metadata
@@ -116,7 +124,36 @@ def create_video(
 
     db.commit()
     db.refresh(video)
+
+    # Automatically extract key vocabulary words from this video and create WORD flashcards
+    try:
+        extract_keywords_for_video(video.id, current_user.id, db)
+    except Exception as err:
+        print(f"[Vocabulary] Error extracting keywords for new video {video.id}: {err}")
+
     return video
+
+
+@router.post("/{id}/extract-keywords", response_model=List[SavedPhraseResponse])
+def extract_video_keywords_endpoint(
+    id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Extract or refresh vocabulary keywords from a video into flashcards.
+    """
+    video = (
+        db.query(Video)
+        .filter(Video.id == id, Video.user_id == current_user.id)
+        .first()
+    )
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    created = extract_keywords_for_video(video.id, current_user.id, db)
+    return created
+
 
 
 @router.get("/{id}", response_model=VideoDetailResponse)

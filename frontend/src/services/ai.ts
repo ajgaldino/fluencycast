@@ -11,7 +11,89 @@ export interface ExplainResponse {
   examples: string[];
 }
 
+export interface ExampleResponse {
+  original: string;
+  example: string;
+  translation?: string;
+}
+
 export const aiService = {
+  async generateExample(text: string): Promise<ExampleResponse> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return { original: '', example: '' };
+    }
+
+    // 1. Try Backend Example Endpoint
+    try {
+      const res = await request<ExampleResponse>('/ai/example', {
+        method: 'POST',
+        body: JSON.stringify({ text: trimmed }),
+      });
+      if (res && res.example && res.example.trim()) {
+        return res;
+      }
+    } catch (err) {
+      console.warn('Backend example generation failed, falling back to client-side:', err);
+    }
+
+    // 2. Direct client-side Google Dictionary Chrome API
+    try {
+      const gUrl = `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=en&tl=pt&dt=ex&dt=md&q=${encodeURIComponent(trimmed)}`;
+      const gRes = await fetch(gUrl);
+      if (gRes.ok) {
+        const data = await gRes.json();
+        if (Array.isArray(data)) {
+          for (const item of data) {
+            if (Array.isArray(item)) {
+              for (const sub of item) {
+                if (Array.isArray(sub) && sub.length > 1 && Array.isArray(sub[1])) {
+                  for (const defItem of sub[1]) {
+                    if (Array.isArray(defItem) && defItem.length > 2 && typeof defItem[2] === 'string') {
+                      const candidate = defItem[2].trim();
+                      if (candidate && candidate.length > 10) {
+                        const formatted = candidate.charAt(0).toUpperCase() + candidate.slice(1) + (/[.!?]$/.test(candidate) ? '' : '.');
+                        return { original: trimmed, example: formatted };
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Client example fallback 1 failed:', err);
+    }
+
+    // 3. Direct client-side Tatoeba API
+    try {
+      const tUrl = `https://tatoeba.org/en/api_v0/search?from=eng&query=${encodeURIComponent(trimmed)}`;
+      const tRes = await fetch(tUrl);
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        const results = tData?.results;
+        if (Array.isArray(results)) {
+          for (const r of results) {
+            const txt = r?.text?.trim();
+            if (txt && txt.toLowerCase().includes(trimmed.toLowerCase()) && txt.length >= 12) {
+              return { original: trimmed, example: txt };
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Client example fallback 2 failed:', err);
+    }
+
+    // 4. Smart conversational fallback
+    const fallbackSentence = trimmed.includes(' ')
+      ? `Native speakers frequently use "${trimmed}" in casual conversations.`
+      : `You can practice using "${trimmed}" in sentences to sound more natural.`;
+
+    return { original: trimmed, example: fallbackSentence };
+  },
   async translate(text: string): Promise<TranslateResponse> {
     const trimmed = text.trim();
     if (!trimmed) {

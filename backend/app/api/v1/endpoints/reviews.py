@@ -14,52 +14,54 @@ from app.schemas.review import ReviewSubmitRequest, ReviewResponse, DailyReviewS
 router = APIRouter()
 
 
+from sqlalchemy import func
+from app.services.vocabulary import get_video_filter_condition
+
 @router.get("/summary", response_model=DailyReviewSummary)
 def get_review_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    video_id: Optional[str] = Query(None, description="Filter summary by video ID"),
 ) -> Any:
     """
     Get summary of reviews: due count, mastered, learning, streak.
+    Supports filtering by specific video_id or all videos if omitted.
     """
     now = datetime.now(timezone.utc)
+    base_query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
+    if video_id and video_id.strip() and video_id.upper() != "ALL":
+        base_query = base_query.filter(get_video_filter_condition(video_id, current_user.id, db))
+
     due_count = (
-        db.query(SavedPhrase)
-        .filter(
-            SavedPhrase.user_id == current_user.id,
-            SavedPhrase.next_review_at <= now
-        )
+        base_query
+        .filter(SavedPhrase.next_review_at <= now)
         .count()
     )
     mastered_count = (
-        db.query(SavedPhrase)
-        .filter(
-            SavedPhrase.user_id == current_user.id,
-            SavedPhrase.status == "MASTERED"
-        )
+        base_query
+        .filter(SavedPhrase.status == "MASTERED")
         .count()
     )
     learning_count = (
-        db.query(SavedPhrase)
-        .filter(
-            SavedPhrase.user_id == current_user.id,
-            SavedPhrase.status.in_(["NEW", "LEARNING", "REVIEW"])
-        )
+        base_query
+        .filter(SavedPhrase.status.in_(["NEW", "LEARNING", "REVIEW"]))
         .count()
     )
     streak = current_user.profile.current_streak if current_user.profile else 0
 
     # Count reviews done today
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    reviewed_today = (
+    reviewed_today_query = (
         db.query(PhraseReview)
         .join(SavedPhrase, PhraseReview.saved_phrase_id == SavedPhrase.id)
         .filter(
             SavedPhrase.user_id == current_user.id,
             PhraseReview.reviewed_at >= today_start
         )
-        .count()
     )
+    if video_id and video_id.strip() and video_id.upper() != "ALL":
+        reviewed_today_query = reviewed_today_query.filter(get_video_filter_condition(video_id, current_user.id, db))
+    reviewed_today = reviewed_today_query.count()
 
     return DailyReviewSummary(
         due_phrases_count=due_count,
@@ -74,26 +76,46 @@ def get_review_summary(
 def get_today_reviews(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    phrase_type: Optional[str] = None,
+    phrase_type: Optional[str] = Query(None, description="SENTENCE, WORD, or ALL"),
+    video_id: Optional[str] = Query(None, description="Filter cards by specific video ID"),
     all_cards: bool = False,
     limit: int = 100,
 ) -> Any:
     """
     Get phrases due for review according to spaced repetition schedule.
+    If video_id is passed, filters to that video's cards and associated vocabulary.
     If all_cards=True, returns all saved phrases (free practice / cram mode).
     If all_cards=False, returns strictly phrases whose next_review_at <= now.
     """
     now = datetime.now(timezone.utc)
     query = db.query(SavedPhrase).filter(SavedPhrase.user_id == current_user.id)
-    
+
+    if video_id and video_id.strip() and video_id.upper() != "ALL":
+        query = query.filter(get_video_filter_condition(video_id, current_user.id, db))
+
     if not all_cards:
         query = query.filter(SavedPhrase.next_review_at <= now)
 
-    if phrase_type:
-        query = query.filter(SavedPhrase.phrase_type == phrase_type.upper())
+    if phrase_type and phrase_type.upper() != "ALL":
+        p_type = phrase_type.upper()
+        if p_type == "SENTENCE":
+            query = query.filter(func.upper(SavedPhrase.phrase_type) != "WORD")
+        else:
+            query = query.filter(func.upper(SavedPhrase.phrase_type) == p_type)
 
-    phrases = query.order_by(SavedPhrase.next_review_at.asc()).limit(limit).all()
-    return phrases
+    phrases = query.order_by(SavedPhrase.next_review_at.asc()).all()
+
+    # Deduplicate repeated words within the review session
+    seen_words = set()
+    deduped = []
+    for p in phrases:
+        key = p.text.strip().lower() if (p.phrase_type or "").upper() == "WORD" else p.id
+        if key not in seen_words:
+            seen_words.add(key)
+            deduped.append(p)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 @router.post("/{phrase_id}/submit", response_model=ReviewResponse)

@@ -87,3 +87,94 @@ def test_create_phrase_empty_text_error(client):
     res = client.post("/api/v1/phrases/", json={"text": "   "}, headers=headers)
     assert res.status_code == 400
     assert "não pode ser vazio" in res.json()["detail"]
+
+
+def test_create_word_deduplication_across_different_videos(client):
+    headers = get_auth_headers(client, email="cross_video_dedup@fluencycast.com")
+    
+    # Save word under video_id 1
+    p1 = {
+        "text": "mastery",
+        "translation": "domínio",
+        "phrase_type": "WORD",
+        "video_id": "vid-111"
+    }
+    res1 = client.post("/api/v1/phrases/", json=p1, headers=headers)
+    assert res1.status_code == 201
+    id1 = res1.json()["id"]
+
+    # Save SAME word under video_id 2
+    p2 = {
+        "text": "MASTERY",
+        "translation": "maestria",
+        "phrase_type": "WORD",
+        "video_id": "vid-222"
+    }
+    res2 = client.post("/api/v1/phrases/", json=p2, headers=headers)
+    assert res2.status_code == 201
+    data2 = res2.json()
+    assert data2["id"] == id1  # Same card returned without creating a duplicate!
+    
+    # Query all words: only ONE card exists in the deck!
+    res_list = client.get("/api/v1/phrases/?phrase_type=WORD", headers=headers)
+    words = [p["text"].lower() for p in res_list.json()]
+    assert words.count("mastery") == 1
+
+
+def test_extract_keywords_no_duplicates_across_videos(db_session):
+    from app.models.user import User
+    from app.models.video import Video
+    from app.models.transcript import TranscriptSegment
+    from app.services.vocabulary import extract_keywords_for_video, get_video_filter_condition
+    from app.models.phrase import SavedPhrase
+
+    # Setup user
+    user = User(email="keyword_dedup@test.com", hashed_password="pw", full_name="Tester")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    # Setup Video 1
+    v1 = Video(user_id=user.id, youtube_id="yt111", url="https://youtube.com/watch?v=yt111", title="Video 1")
+    db_session.add(v1)
+    db_session.commit()
+    db_session.refresh(v1)
+
+    seg1 = TranscriptSegment(video_id=v1.id, sequence=1, start_time=0.0, end_time=2.0, text="This is a great challenge and journey.")
+    db_session.add(seg1)
+    db_session.commit()
+
+    # Setup Video 2
+    v2 = Video(user_id=user.id, youtube_id="yt222", url="https://youtube.com/watch?v=yt222", title="Video 2")
+    db_session.add(v2)
+    db_session.commit()
+    db_session.refresh(v2)
+
+    seg2 = TranscriptSegment(video_id=v2.id, sequence=1, start_time=0.0, end_time=2.0, text="Another challenge awaits our destiny.")
+    db_session.add(seg2)
+    db_session.commit()
+
+    # Extract keywords for Video 1
+    k1 = extract_keywords_for_video(v1.id, user.id, db_session)
+    words_v1 = [p.text.lower() for p in k1]
+    assert "challenge" in words_v1
+
+    # Extract keywords for Video 2
+    k2 = extract_keywords_for_video(v2.id, user.id, db_session)
+    words_v2 = [p.text.lower() for p in k2]
+    # "challenge" was already in Video 1, so it MUST NOT be recreated in Video 2!
+    assert "challenge" not in words_v2
+    assert "destiny" in words_v2
+
+    # Verify total cards in database for user: "challenge" appears exactly ONCE
+    all_user_words = db_session.query(SavedPhrase).filter(SavedPhrase.user_id == user.id, SavedPhrase.phrase_type == "WORD").all()
+    card_texts = [p.text.lower() for p in all_user_words]
+    assert card_texts.count("challenge") == 1
+
+    # Verify video filter condition for Video 2 includes both "destiny" and "challenge"
+    cond_v2 = get_video_filter_condition(v2.id, user.id, db_session)
+    v2_cards = db_session.query(SavedPhrase).filter(SavedPhrase.user_id == user.id, cond_v2).all()
+    v2_card_texts = [p.text.lower() for p in v2_cards]
+    assert "challenge" in v2_card_texts
+    assert "destiny" in v2_card_texts
+

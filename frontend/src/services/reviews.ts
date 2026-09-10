@@ -11,14 +11,18 @@ export interface SubmitReviewResponse {
 }
 
 export const reviewService = {
-  async getSummary(): Promise<ReviewSummary> {
-    return request<ReviewSummary>('/reviews/summary');
+  async getSummary(videoId?: string): Promise<ReviewSummary> {
+    const params = new URLSearchParams();
+    if (videoId && videoId !== 'ALL') params.append('video_id', videoId);
+    const qs = params.toString();
+    return request<ReviewSummary>(`/reviews/summary${qs ? `?${qs}` : ''}`);
   },
 
-  async getTodayReviews(phraseType?: string, allCards?: boolean): Promise<SavedPhrase[]> {
+  async getTodayReviews(phraseType?: string, allCards?: boolean, videoId?: string): Promise<SavedPhrase[]> {
     const params = new URLSearchParams();
-    if (phraseType) params.append('phrase_type', phraseType);
+    if (phraseType && phraseType !== 'ALL') params.append('phrase_type', phraseType);
     if (allCards) params.append('all_cards', 'true');
+    if (videoId && videoId !== 'ALL') params.append('video_id', videoId);
     const query = params.toString() ? `?${params.toString()}` : '';
     return request<SavedPhrase[]>(`/reviews/today${query}`);
   },
@@ -30,3 +34,4 @@ export const reviewService = {
     });
   },
 };
+

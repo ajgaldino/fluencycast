@@ -32,6 +32,7 @@ import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
 import { aiService, ExplainResponse, WordInfoResponse } from '../../services/ai';
 import { Video, TranscriptSegment } from '../../types/video';
+import { speechService } from '../../services/speech';
 import './VideoStudy.css';
 
 declare global {
@@ -41,66 +42,6 @@ declare global {
   }
 }
 
-/**
- * Intelligent sentence fragmenter:
- * Breaks long paragraphs into concise, bite-sized phrases (8-12 words max)
- * with precisely calculated proportional timestamps.
- */
-function fragmentSegments(rawSegments: TranscriptSegment[]): TranscriptSegment[] {
-  const result: TranscriptSegment[] = [];
-
-  for (const seg of rawSegments) {
-    const text = seg.text.trim();
-    if (!text) continue;
-
-    // Split on sentence terminators (. ! ?)
-    const rawSentences = text
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const pieces: string[] = [];
-    for (const s of rawSentences) {
-      const words = s.split(/\s+/);
-      if (words.length > 12) {
-        // Split by comma, semicolon, dash if still long
-        const sub = s.split(/(?<=[,;—])\s+/).map((p) => p.trim()).filter(Boolean);
-        if (sub.length > 1 && sub.every((p) => p.split(/\s+/).length <= 14)) {
-          pieces.push(...sub);
-        } else {
-          pieces.push(s);
-        }
-      } else {
-        pieces.push(s);
-      }
-    }
-
-    if (pieces.length <= 1) {
-      result.push(seg);
-      continue;
-    }
-
-    const totalLen = pieces.reduce((sum, p) => sum + p.length, 0) || 1;
-    const totalDur = Math.max(0.6, seg.end_time - seg.start_time);
-
-    let currStart = seg.start_time;
-    pieces.forEach((p, idx) => {
-      const pDur = (p.length / totalLen) * totalDur;
-      const pEnd = currStart + pDur;
-      result.push({
-        id: `${seg.id}_p${idx + 1}`,
-        video_id: seg.video_id,
-        sequence: result.length + 1,
-        text: p,
-        start_time: Math.round(currStart * 100) / 100,
-        end_time: Math.round(pEnd * 100) / 100,
-      });
-      currStart = pEnd;
-    });
-  }
-
-  return result;
-}
 
 export const VideoStudy: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -122,7 +63,6 @@ export const VideoStudy: React.FC = () => {
   // Learning Modes
   const [autoScroll, setAutoScroll] = useState(true);
   const [autoTranslate, setAutoTranslate] = useState(false);
-  const [shortSentencesMode, setShortSentencesMode] = useState(true);
   const [listeningBlur, setListeningBlur] = useState(false);
   const [autoPauseMode, setAutoPauseMode] = useState(false);
   const [isPausedForShadowing, setIsPausedForShadowing] = useState(false);
@@ -223,12 +163,10 @@ export const VideoStudy: React.FC = () => {
     };
   }, [id]);
 
-  // Displayed Segments (Full or Fragmented into short sentences)
+  // Displayed Segments (natural transcript segments)
   const displayedSegments = useMemo(() => {
-    if (!video?.segments) return [];
-    if (!shortSentencesMode) return video.segments;
-    return fragmentSegments(video.segments);
-  }, [video?.segments, shortSentencesMode]);
+    return video?.segments || [];
+  }, [video?.segments]);
 
   // 2. Initialize YouTube IFrame Player
   useEffect(() => {
@@ -496,13 +434,7 @@ export const VideoStudy: React.FC = () => {
   };
 
   const handleSpeakWord = (word: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(word);
-      utt.lang = 'en-US';
-      utt.rate = 0.88;
-      window.speechSynthesis.speak(utt);
-    }
+    speechService.speak(word);
   };
 
   // Click on a single word for Instant Dictionary Lookup
@@ -1016,10 +948,28 @@ export const VideoStudy: React.FC = () => {
           <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '0.2rem' }}>
             {video.title}
           </h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem', flexWrap: 'wrap' }}>
             <span>{video.channel || 'YouTube'}</span>
             <span>•</span>
-            <span>{displayedSegments.length} frases {shortSentencesMode ? '(curtas)' : ''}</span>
+            <span>{displayedSegments.length} frases</span>
+            <span>•</span>
+            <button
+              onClick={() => navigate(`/reviews?video_id=${video.id}&mode=WORD`)}
+              className="btn btn-secondary"
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '999px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                borderColor: 'var(--primary)'
+              }}
+              title="Estudar palavras-chave deste vídeo em Flashcards"
+            >
+              <Sparkles size={12} color="var(--primary)" />
+              <span>🃏 Estudar Flashcards</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1035,7 +985,7 @@ export const VideoStudy: React.FC = () => {
               Transcrição Interativa
             </span>
             <span className="transcript-badge-counter">
-              {displayedSegments.length} {shortSentencesMode ? 'frases curtas' : 'frases'}
+              {displayedSegments.length} frases
             </span>
           </div>
 
@@ -1069,16 +1019,6 @@ export const VideoStudy: React.FC = () => {
             >
               {listeningBlur ? <EyeOff size={12} /> : <Eye size={12} />}
               <span>Ouvido</span>
-            </button>
-
-            {/* Short Sentences Mode Toggle */}
-            <button
-              onClick={() => setShortSentencesMode(!shortSentencesMode)}
-              className={`tool-pill ${shortSentencesMode ? 'active' : ''}`}
-              title="Dividir frases longas em trechos curtos para facilitar o estudo"
-            >
-              <Scissors size={12} />
-              <span>Frases Curtas</span>
             </button>
 
             {/* Live Auto-Translate Toggle */}

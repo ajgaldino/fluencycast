@@ -1,5 +1,5 @@
 const rawBase = import.meta.env.VITE_API_URL || '';
-const API_BASE_URL = rawBase
+export const API_BASE_URL = rawBase
   ? (rawBase.endsWith('/api/v1') ? rawBase : `${rawBase.replace(/\/+$/, '')}/api/v1`)
   : '/api/v1';
 
