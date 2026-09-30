@@ -89,9 +89,9 @@ def test_create_phrase_empty_text_error(client):
     assert "não pode ser vazio" in res.json()["detail"]
 
 
-def test_create_word_deduplication_across_different_videos(client):
-    headers = get_auth_headers(client, email="cross_video_dedup@fluencycast.com")
-    
+def test_create_word_individual_cards_per_video(client):
+    headers = get_auth_headers(client, email="individual_video_cards@fluencycast.com")
+
     # Save word under video_id 1
     p1 = {
         "text": "mastery",
@@ -103,7 +103,7 @@ def test_create_word_deduplication_across_different_videos(client):
     assert res1.status_code == 201
     id1 = res1.json()["id"]
 
-    # Save SAME word under video_id 2
+    # Save SAME word under video_id 2 -> creates individual card for video 2!
     p2 = {
         "text": "MASTERY",
         "translation": "maestria",
@@ -112,13 +112,20 @@ def test_create_word_deduplication_across_different_videos(client):
     }
     res2 = client.post("/api/v1/phrases/", json=p2, headers=headers)
     assert res2.status_code == 201
-    data2 = res2.json()
-    assert data2["id"] == id1  # Same card returned without creating a duplicate!
-    
-    # Query all words: only ONE card exists in the deck!
+    id2 = res2.json()["id"]
+    assert id2 != id1
+
+    # Query cards for video 1: returns video 1's card
+    res_v1 = client.get("/api/v1/phrases/?phrase_type=WORD&video_id=vid-111", headers=headers)
+    assert res_v1.status_code == 200
+    v1_items = res_v1.json()
+    assert len(v1_items) == 1
+    assert v1_items[0]["id"] == id1
+
+    # Query all words together (todos juntos): returns both individual cards
     res_list = client.get("/api/v1/phrases/?phrase_type=WORD", headers=headers)
     words = [p["text"].lower() for p in res_list.json()]
-    assert words.count("mastery") == 1
+    assert words.count("mastery") == 2
 
 
 def test_extract_keywords_no_duplicates_across_videos(db_session):
@@ -158,25 +165,26 @@ def test_extract_keywords_no_duplicates_across_videos(db_session):
     k1 = extract_keywords_for_video(v1.id, user.id, db_session)
     words_v1 = [p.text.lower() for p in k1]
     assert "challenge" in words_v1
+    assert "journey" in words_v1
 
-    # Extract keywords for Video 2
+    # Extract keywords for Video 2 - cards are individual per video!
     k2 = extract_keywords_for_video(v2.id, user.id, db_session)
     words_v2 = [p.text.lower() for p in k2]
-    # "challenge" was already in Video 1, so it MUST NOT be recreated in Video 2!
-    assert "challenge" not in words_v2
+    # Video 2 has its own individual card for "challenge" and "destiny"
+    assert "challenge" in words_v2
     assert "destiny" in words_v2
 
-    # Verify total cards in database for user: "challenge" appears exactly ONCE
-    all_user_words = db_session.query(SavedPhrase).filter(SavedPhrase.user_id == user.id, SavedPhrase.phrase_type == "WORD").all()
-    card_texts = [p.text.lower() for p in all_user_words]
-    assert card_texts.count("challenge") == 1
-
-    # Verify video filter condition for Video 2 includes both "destiny" and "challenge"
+    # Verify video filter condition for Video 2 returns Video 2's individual cards
     cond_v2 = get_video_filter_condition(v2.id, user.id, db_session)
     v2_cards = db_session.query(SavedPhrase).filter(SavedPhrase.user_id == user.id, cond_v2).all()
     v2_card_texts = [p.text.lower() for p in v2_cards]
     assert "challenge" in v2_card_texts
     assert "destiny" in v2_card_texts
+    assert "journey" not in v2_card_texts
+
+    # Verify all cards together (todos juntos) includes all cards across videos
+    all_user_words = db_session.query(SavedPhrase).filter(SavedPhrase.user_id == user.id, SavedPhrase.phrase_type == "WORD").all()
+    assert len(all_user_words) >= 4
 
 
 def test_auto_repair_untranslated_phrases(client, db_session):

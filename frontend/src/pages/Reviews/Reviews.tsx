@@ -919,84 +919,128 @@ export const Reviews: React.FC = () => {
           </div>
         </div>
 
-        {/* Video Filter Selector Bar */}
-        <div className="video-deck-filter-bar">
-          <div className="video-filter-label">
-            <Film size={14} color="var(--primary)" />
-            <span>Filtrar por Vídeo:</span>
-          </div>
-          <div className="video-filter-select-wrapper">
-            <select
-              value={selectedVideoId}
-              onChange={(e) => handleVideoFilterChange(e.target.value)}
-              className="video-filter-select"
-            >
-              <option value="ALL">🌐 Todos os vídeos (sem distinção)</option>
-              {videosList.map((v) => (
-                <option key={v.id} value={v.id}>
-                  🎬 {v.title.length > 46 ? v.title.slice(0, 46) + '...' : v.title}
-                </option>
-              ))}
-            </select>
-          </div>
-          {selectedVideoId !== 'ALL' && (
-            <button
-              onClick={() => handleVideoFilterChange('ALL')}
-              className="video-filter-reset-btn"
-              title="Ver todas as palavras sem distinção de vídeo"
-            >
-              <X size={12} />
-              <span>Ver Todos</span>
-            </button>
-          )}
+        {/* Card Deck Mode: Todos os Cards Juntos vs Individual por Vídeo */}
+        <div className="card-group-mode-toggle">
+          <button
+            onClick={() => handleVideoFilterChange('ALL')}
+            className={`card-group-mode-btn ${selectedVideoId === 'ALL' ? 'active' : ''}`}
+            title="Estudar todos os cards salvos misturados"
+          >
+            <Layers size={16} />
+            <span>🌐 Todos os Cards Juntos</span>
+          </button>
+          <button
+            onClick={() => {
+              if (selectedVideoId === 'ALL') {
+                if (videosList.length > 0) {
+                  handleVideoFilterChange(videosList[0].id);
+                }
+              }
+            }}
+            className={`card-group-mode-btn ${selectedVideoId !== 'ALL' ? 'active' : ''}`}
+            title="Estudar exclusivamente os cards deste vídeo"
+          >
+            <Film size={16} />
+            <span>🎬 Individual por Vídeo</span>
+          </button>
         </div>
 
-        {/* Active Video Context Banner */}
-        {selectedVideoId !== 'ALL' && (() => {
-          const activeVideo = videosList.find((v) => v.id === selectedVideoId);
-          if (!activeVideo) return null;
-          return (
-            <div className="active-video-study-banner">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
-                {activeVideo.thumbnail_url && (
-                  <img
-                    src={activeVideo.thumbnail_url}
-                    alt={activeVideo.title}
-                    style={{ width: '48px', height: '30px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
-                  />
-                )}
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {activeVideo.title}
+        {selectedVideoId !== 'ALL' ? (
+          <div className="video-individual-deck-panel">
+            <div className="video-deck-filter-bar">
+              <div className="video-filter-label">
+                <Film size={14} color="var(--primary)" />
+                <span>Vídeo selecionado:</span>
+              </div>
+              <div className="video-filter-select-wrapper">
+                <select
+                  value={selectedVideoId}
+                  onChange={(e) => handleVideoFilterChange(e.target.value)}
+                  className="video-filter-select"
+                >
+                  {videosList.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      🎬 {v.title.length > 46 ? v.title.slice(0, 46) + '...' : v.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => handleVideoFilterChange('ALL')}
+                className="video-filter-reset-btn"
+                title="Voltar para Todos os Cards Juntos"
+              >
+                <X size={12} />
+                <span>Ver Todos Juntos</span>
+              </button>
+            </div>
+
+            {/* Active Video Context Banner */}
+            {(() => {
+              const activeVideo = videosList.find((v) => v.id === selectedVideoId);
+              if (!activeVideo) return null;
+              return (
+                <div className="active-video-study-banner">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
+                    {activeVideo.thumbnail_url && (
+                      <img
+                        src={activeVideo.thumbnail_url}
+                        alt={activeVideo.title}
+                        style={{ width: '48px', height: '30px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
+                      />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {activeVideo.title}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        Cards individuais deste vídeo ({allCount} cards)
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                    Vocabulário deste vídeo ({allCount} cards)
+                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                    <button
+                      onClick={handleExtractVideoKeywords}
+                      disabled={extractingWords}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
+                      title="Extrair palavras de todas as frases deste vídeo"
+                    >
+                      {extractingWords ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} color="var(--primary)" />}
+                      <span>{extractingWords ? 'Extraindo...' : '⚡ Extrair Palavras'}</span>
+                    </button>
+                    <Link
+                      to={`/videos/${activeVideo.id}`}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
+                      title="Assistir com transcrição sincronizada"
+                    >
+                      <span>Assistir</span>
+                    </Link>
                   </div>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                <button
-                  onClick={handleExtractVideoKeywords}
-                  disabled={extractingWords}
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
-                  title="Extrair ou atualizar palavras-chave deste vídeo"
-                >
-                  {extractingWords ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} color="var(--primary)" />}
-                  <span>Extrair Palavras</span>
-                </button>
-                <Link
-                  to={`/videos/${activeVideo.id}`}
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
-                  title="Assistir com transcrição sincronizada"
-                >
-                  <span>Assistir</span>
-                </Link>
-              </div>
+              );
+            })()}
+          </div>
+        ) : (
+          <div className="all-cards-study-banner">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Layers size={16} color="var(--accent-cyan)" />
+              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                Revisando <strong>todos os cards juntos</strong> ({allCount} cards disponíveis em sua biblioteca)
+              </span>
             </div>
-          );
-        })()}
+            {videosList.length > 0 && (
+              <button
+                onClick={() => handleVideoFilterChange(videosList[0].id)}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+              >
+                <span>Escolher por Vídeo</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Scope Selector: Somente Agendadas (Disponíveis Hoje) vs Prática Livre (Todas) */}
         <div className="simpler-scope-selector">

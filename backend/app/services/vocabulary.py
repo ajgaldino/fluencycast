@@ -49,14 +49,14 @@ def extract_keywords_for_video(
     video_id: str,
     user_id: str,
     db: Session,
-    max_keywords: int = 150
+    max_keywords: Optional[int] = None
 ) -> List[SavedPhrase]:
     """
-    Extracts high-impact vocabulary words directly from a video's transcript segments,
-    translates them into Portuguese, and creates SavedPhrase flashcards of type 'WORD'
-    linked to that video.
+    Extracts vocabulary words directly from ALL transcript segments of a video,
+    translates them into Portuguese, and creates individual SavedPhrase flashcards of type 'WORD'
+    linked to that specific video.
     """
-    # 1. Fetch transcript segments for this video
+    # 1. Fetch all transcript segments for this video
     segments = (
         db.query(TranscriptSegment)
         .filter(TranscriptSegment.video_id == video_id)
@@ -66,22 +66,23 @@ def extract_keywords_for_video(
     if not segments:
         return []
 
-    # 2. All words already saved by this user (across ANY video or manual cards)
-    # This guarantees NO duplicate words exist across different videos.
-    existing_user_words = {
+    # 2. Existing words already saved for THIS specific video (avoids duplicate cards within this video)
+    existing_video_words = {
         re.sub(r'[^a-zA-Z]', '', p.text).strip().lower()
         for p in db.query(SavedPhrase)
         .filter(
             SavedPhrase.user_id == user_id,
+            SavedPhrase.video_id == video_id,
             func.upper(SavedPhrase.phrase_type) == "WORD"
         )
         .all()
         if p.text
     }
 
-    # 3. Frequency and context tracking across segments
-    word_freq: Dict[str, int] = {}
+    # 3. Look at ALL sentences of the video and extract vocabulary words from all of them
+    words_to_create: List[str] = []
     word_context: Dict[str, Dict[str, Any]] = {}
+    seen_in_batch = set()
 
     for seg in segments:
         tokens = re.findall(r'\b[a-zA-Z]{3,}\b', seg.text)
@@ -89,36 +90,27 @@ def extract_keywords_for_video(
             clean_w = t.strip().lower()
             if clean_w in STOPWORDS:
                 continue
-            # Skip words already saved in ANY video or manual flashcards
-            if clean_w in existing_user_words:
+            if clean_w in existing_video_words:
+                continue
+            if clean_w in seen_in_batch:
                 continue
 
-            word_freq[clean_w] = word_freq.get(clean_w, 0) + 1
-            if clean_w not in word_context:
-                word_context[clean_w] = {
-                    "context_sentence": seg.text,
-                    "timestamp": seg.start_time,
-                    "segment_id": seg.id
-                }
+            seen_in_batch.add(clean_w)
+            words_to_create.append(clean_w)
+            word_context[clean_w] = {
+                "context_sentence": seg.text.strip(),
+                "timestamp": seg.start_time,
+                "segment_id": seg.id
+            }
 
-    if not word_freq:
+    if not words_to_create:
         return []
 
-    # 4. Score and rank candidates:
-    # Strongly reward frequency in this specific video (+3 per repetition),
-    # substantive word length 5-14 (+2), and core dictionary (+2)
-    def word_score(w: str) -> float:
-        score = word_freq[w] * 3.0
-        if 5 <= len(w) <= 14:
-            score += 2.0
-        elif len(w) == 4:
-            score += 1.0
-        if w in CORE_DICTIONARY:
-            score += 2.0
-        return score
-
-    sorted_candidates = sorted(word_freq.keys(), key=word_score, reverse=True)
-    selected_words = sorted_candidates[:max_keywords]
+    # If max_keywords is explicitly specified and > 0, limit; otherwise extract all words from all sentences
+    if max_keywords and max_keywords > 0:
+        selected_words = words_to_create[:max_keywords]
+    else:
+        selected_words = words_to_create
 
     # 5. Fast translation retrieval:
     # Check CORE_DICTIONARY, in-memory cache, or pre-existing DB translations
@@ -294,50 +286,7 @@ def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100
 def get_video_filter_condition(video_id: str, user_id: str, db: Session):
     """
     Builds a filter condition for phrases associated with a given video.
-    Includes:
-    1. Saved phrases directly tied to this video (video_id).
-    2. Any saved WORD cards belonging to the user whose text is present in this
-       video's transcript segments, enabling seamless study of video vocabulary
-       without duplicating cards across different videos.
+    Cards are individual per video (video_id).
     """
-    from sqlalchemy import or_, and_
-
-    # 1. Fetch user's saved words
-    user_words = [
-        re.sub(r'[^a-zA-Z]', '', p.text).strip().lower()
-        for p in db.query(SavedPhrase.text)
-        .filter(
-            SavedPhrase.user_id == user_id,
-            func.upper(SavedPhrase.phrase_type) == "WORD"
-        )
-        .all()
-        if p.text
-    ]
-
-    if not user_words:
-        return SavedPhrase.video_id == video_id
-
-    # 2. Fetch words from this video's transcript segments
-    segments = db.query(TranscriptSegment.text).filter(TranscriptSegment.video_id == video_id).all()
-    if not segments:
-        return SavedPhrase.video_id == video_id
-
-    video_tokens = set()
-    for (seg_text,) in segments:
-        for match in re.findall(r'\b[a-zA-Z]{3,}\b', seg_text.lower()):
-            video_tokens.add(match)
-
-    # 3. Intersection: user words present in this video
-    matching_user_words = [w for w in set(user_words) if w in video_tokens]
-
-    if matching_user_words:
-        return or_(
-            SavedPhrase.video_id == video_id,
-            and_(
-                func.upper(SavedPhrase.phrase_type) == "WORD",
-                func.lower(SavedPhrase.text).in_(matching_user_words)
-            )
-        )
-
     return SavedPhrase.video_id == video_id
 

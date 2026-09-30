@@ -24,7 +24,7 @@ def get_saved_phrases(
     status: Optional[str] = Query(None, description="Filter by status: NEW, LEARNING, REVIEW, MASTERED"),
     phrase_type: Optional[str] = Query(None, description="Filter by phrase_type: SENTENCE, WORD, etc."),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,
 ) -> Any:
     """
     Retrieve all saved phrases for the current user.
@@ -57,7 +57,7 @@ def create_saved_phrase(
 ) -> Any:
     """
     Save a new phrase manually or from a video segment.
-    Prevents duplicate WORD cards across DIFFERENT videos for the same user while keeping them updated.
+    Cards are individual per video, preventing duplication only within the SAME video.
     """
     clean_text = phrase_in.text.strip()
     if not clean_text:
@@ -77,10 +77,11 @@ def create_saved_phrase(
 
     p_type = (phrase_in.phrase_type or "SENTENCE").upper()
 
-    # Deduplicate single words across all videos for this user
+    # Deduplicate single words within the SAME video (or manual without video)
     if p_type == "WORD":
         dedup_query = db.query(SavedPhrase).filter(
             SavedPhrase.user_id == current_user.id,
+            SavedPhrase.video_id == phrase_in.video_id,
             func.upper(SavedPhrase.phrase_type) == "WORD",
             func.lower(SavedPhrase.text) == clean_text.lower()
         )
@@ -93,11 +94,6 @@ def create_saved_phrase(
                 updated = True
             if not existing.context_sentence and phrase_in.context_sentence:
                 existing.context_sentence = phrase_in.context_sentence
-                updated = True
-            if not existing.video_id and phrase_in.video_id:
-                existing.video_id = phrase_in.video_id
-                existing.transcript_segment_id = phrase_in.transcript_segment_id
-                existing.timestamp = phrase_in.timestamp
                 updated = True
             if updated:
                 db.commit()
@@ -160,7 +156,7 @@ def extract_words_from_phrases(
     Otherwise, extracts from saved phrases.
     """
     if video_id and video_id.strip() and video_id.upper() != "ALL":
-        return extract_keywords_for_video(video_id, current_user.id, db, max_keywords=limit or 150)
+        return extract_keywords_for_video(video_id, current_user.id, db, max_keywords=limit)
 
     import re
     from app.api.v1.endpoints.ai import translate_text, TranslateRequest, CORE_DICTIONARY

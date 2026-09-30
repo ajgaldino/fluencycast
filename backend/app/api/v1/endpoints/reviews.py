@@ -80,11 +80,11 @@ def get_today_reviews(
     phrase_type: Optional[str] = Query(None, description="SENTENCE, WORD, or ALL"),
     video_id: Optional[str] = Query(None, description="Filter cards by specific video ID"),
     all_cards: bool = False,
-    limit: int = 100,
+    limit: int = 1000,
 ) -> Any:
     """
     Get phrases due for review according to spaced repetition schedule.
-    If video_id is passed, filters to that video's cards and associated vocabulary.
+    If video_id is passed, filters to that video's individual cards.
     If all_cards=True, returns all saved phrases (free practice / cram mode).
     If all_cards=False, returns strictly phrases whose next_review_at <= now.
     """
@@ -112,15 +112,14 @@ def get_today_reviews(
 
     phrases = query.order_by(SavedPhrase.next_review_at.asc()).all()
 
-    # Deduplicate repeated words within the review session and ensure translation is present
-    seen_words = set()
+    # Deduplicate repeated cards within the review session and ensure translation is present
+    seen_ids = set()
     deduped = []
     has_fixes = False
 
     for p in phrases:
-        key = p.text.strip().lower() if (p.phrase_type or "").upper() == "WORD" else p.id
-        if key not in seen_words:
-            seen_words.add(key)
+        if p.id not in seen_ids:
+            seen_ids.add(p.id)
 
             # Safeguard: if translation equals text or is empty, repair immediately
             t_clean = (p.translation or "").strip().lower()

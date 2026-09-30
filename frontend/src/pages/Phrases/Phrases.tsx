@@ -603,14 +603,38 @@ export const Phrases: React.FC = () => {
         )}
       </div>
 
-      {/* Video Filter & Status Filter Row */}
+      {/* Mode Switcher: Todos os Cards Juntos vs Individual por Vídeo */}
+      <div className="card-group-mode-toggle" style={{ marginBottom: '1rem' }}>
+        <button
+          onClick={() => setSelectedVideoId('ALL')}
+          className={`card-group-mode-btn ${selectedVideoId === 'ALL' ? 'active' : ''}`}
+          title="Ver todos os cards salvos juntos"
+        >
+          <Layers size={16} />
+          <span>🌐 Todos os Cards Juntos</span>
+        </button>
+        <button
+          onClick={() => {
+            if (selectedVideoId === 'ALL' && videosList.length > 0) {
+              setSelectedVideoId(videosList[0].id);
+            }
+          }}
+          className={`card-group-mode-btn ${selectedVideoId !== 'ALL' ? 'active' : ''}`}
+          title="Ver exclusivamente os cards de um vídeo"
+        >
+          <Film size={16} />
+          <span>🎬 Individual por Vídeo</span>
+        </button>
+      </div>
+
+      {/* Filter Row: Status Tabs + Video Selector */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '0.75rem',
         flexWrap: 'wrap',
-        marginBottom: '1.25rem'
+        marginBottom: '1rem'
       }}>
         {/* Filter Status Tabs */}
         <div style={{ display: 'flex', gap: '0.4rem', overflowX: 'auto', paddingBottom: '0.2rem' }}>
@@ -631,27 +655,27 @@ export const Phrases: React.FC = () => {
           ))}
         </div>
 
-        {/* Video Selector Dropdown */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px', flex: '1', maxWidth: '380px' }}>
-          <Film size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
-          <select
-            value={selectedVideoId}
-            onChange={(e) => setSelectedVideoId(e.target.value)}
-            className="form-input"
-            style={{ padding: '0.35rem 0.6rem', fontSize: '0.82rem', height: 'auto', cursor: 'pointer' }}
-          >
-            <option value="ALL">🌐 Todos os vídeos (sem distinção)</option>
-            {videosList.map((v) => (
-              <option key={v.id} value={v.id}>
-                🎬 {v.title.length > 42 ? v.title.slice(0, 42) + '...' : v.title}
-              </option>
-            ))}
-          </select>
-        </div>
+        {selectedVideoId !== 'ALL' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px', flex: '1', maxWidth: '380px' }}>
+            <Film size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
+            <select
+              value={selectedVideoId}
+              onChange={(e) => setSelectedVideoId(e.target.value)}
+              className="form-input"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.82rem', height: 'auto', cursor: 'pointer' }}
+            >
+              {videosList.map((v) => (
+                <option key={v.id} value={v.id}>
+                  🎬 {v.title.length > 42 ? v.title.slice(0, 42) + '...' : v.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Active Video Shortcut Banner in Library */}
-      {selectedVideoId !== 'ALL' && (() => {
+      {selectedVideoId !== 'ALL' ? (() => {
         const activeVideo = videosList.find((v) => v.id === selectedVideoId);
         if (!activeVideo) return null;
         return (
@@ -680,7 +704,7 @@ export const Phrases: React.FC = () => {
                   {activeVideo.title}
                 </div>
                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  Visualizando vocabulário filtrado deste vídeo ({filteredItems.length} itens)
+                  Cards individuais deste vídeo ({filteredItems.length} itens encontrados)
                 </div>
               </div>
             </div>
@@ -698,15 +722,31 @@ export const Phrases: React.FC = () => {
                 disabled={extractingWords}
                 className="btn btn-secondary"
                 style={{ fontSize: '0.74rem', padding: '0.3rem 0.65rem' }}
-                title="Extrair palavras-chave da transcrição"
+                title="Extrair palavras de todas as frases deste vídeo"
               >
                 {extractingWords ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} color="var(--accent-cyan)" />}
-                <span>+ Extrair Mais Palavras</span>
+                <span>⚡ Extrair Palavras de Todas as Frases</span>
               </button>
             </div>
           </div>
         );
-      })()}
+      })() : (
+        <div className="all-cards-study-banner" style={{ marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Layers size={16} color="var(--accent-cyan)" />
+            <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+              Visualizando <strong>todos os cards juntos</strong> ({filteredItems.length} itens de todos os vídeos e biblioteca)
+            </span>
+          </div>
+          <Link
+            to="/reviews"
+            className="btn btn-primary"
+            style={{ fontSize: '0.74rem', padding: '0.25rem 0.65rem' }}
+          >
+            <span>🃏 Estudar Todos Juntos</span>
+          </Link>
+        </div>
+      )}
 
       {/* Content Rendering */}
       {loading ? (
