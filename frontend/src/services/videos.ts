@@ -24,6 +24,12 @@ export const videoService = {
     });
   },
 
+  async syncAllKeywords(): Promise<{ message: string; videos_processed: number; total_cards_created: number }> {
+    return request('/videos/sync-all-keywords', {
+      method: 'POST',
+    });
+  },
+
   async deleteVideo(id: string): Promise<void> {
     return request<void>(`/videos/${id}`, {
       method: 'DELETE',

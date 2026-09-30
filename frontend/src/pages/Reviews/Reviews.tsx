@@ -354,12 +354,27 @@ export const Reviews: React.FC = () => {
     if (selectedVideoId === 'ALL') return;
     try {
       setExtractingWords(true);
-      await videoService.extractKeywords(selectedVideoId);
+      const res = await videoService.extractKeywords(selectedVideoId);
       await loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope, selectedVideoId);
+      alert(`🎉 ${res.length} palavras extraídas de todas as frases deste vídeo!`);
     } catch (err: any) {
       alert(err.message || 'Falha ao extrair palavras-chave do vídeo.');
     } finally {
       setExtractingWords(false);
+    }
+  };
+
+  const [syncingAll, setSyncingAll] = useState(false);
+  const handleSyncAllVideos = async () => {
+    try {
+      setSyncingAll(true);
+      const res = await videoService.syncAllKeywords();
+      await loadReviews(reviewMode === 'REVERSE' ? 'SENTENCE' : reviewMode, reviewScope, selectedVideoId);
+      alert(`🎉 ${res.message}`);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao sincronizar todos os vídeos.');
+    } finally {
+      setSyncingAll(false);
     }
   };
 
@@ -1030,15 +1045,27 @@ export const Reviews: React.FC = () => {
                 Revisando <strong>todos os cards juntos</strong> ({allCount} cards disponíveis em sua biblioteca)
               </span>
             </div>
-            {videosList.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
               <button
-                onClick={() => handleVideoFilterChange(videosList[0].id)}
+                onClick={handleSyncAllVideos}
+                disabled={syncingAll}
                 className="btn btn-secondary"
-                style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                title="Varre todas as frases de todos os seus vídeos e extrai as palavras restantes"
               >
-                <span>Escolher por Vídeo</span>
+                {syncingAll ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} color="var(--accent-cyan)" />}
+                <span>{syncingAll ? 'Sincronizando...' : '⚡ Sincronizar Todos os Vídeos'}</span>
               </button>
-            )}
+              {videosList.length > 0 && (
+                <button
+                  onClick={() => handleVideoFilterChange(videosList[0].id)}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                >
+                  <span>Escolher por Vídeo</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
 

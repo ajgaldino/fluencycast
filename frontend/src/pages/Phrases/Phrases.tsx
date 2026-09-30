@@ -116,6 +116,20 @@ export const Phrases: React.FC = () => {
     }
   };
 
+  const [syncingAll, setSyncingAll] = useState(false);
+  const handleSyncAllVideos = async () => {
+    try {
+      setSyncingAll(true);
+      const res = await videoService.syncAllKeywords();
+      await loadPhrases();
+      alert(`🎉 ${res.message}`);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao sincronizar todos os vídeos.');
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   const toggleTranslation = (id: string) => {
     setVisibleTranslations((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -738,13 +752,25 @@ export const Phrases: React.FC = () => {
               Visualizando <strong>todos os cards juntos</strong> ({filteredItems.length} itens de todos os vídeos e biblioteca)
             </span>
           </div>
-          <Link
-            to="/reviews"
-            className="btn btn-primary"
-            style={{ fontSize: '0.74rem', padding: '0.25rem 0.65rem' }}
-          >
-            <span>🃏 Estudar Todos Juntos</span>
-          </Link>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <button
+              onClick={handleSyncAllVideos}
+              disabled={syncingAll}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.74rem', padding: '0.25rem 0.65rem' }}
+              title="Varre todas as frases de todos os seus vídeos e extrai as palavras restantes"
+            >
+              {syncingAll ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} color="var(--accent-cyan)" />}
+              <span>{syncingAll ? 'Sincronizando...' : '⚡ Sincronizar Todos os Vídeos'}</span>
+            </button>
+            <Link
+              to="/reviews"
+              className="btn btn-primary"
+              style={{ fontSize: '0.74rem', padding: '0.25rem 0.65rem' }}
+            >
+              <span>🃏 Estudar Todos Juntos</span>
+            </Link>
+          </div>
         </div>
       )}
 

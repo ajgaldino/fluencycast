@@ -134,6 +134,29 @@ def create_video(
     return video
 
 
+@router.post("/sync-all-keywords")
+def sync_all_videos_keywords(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Extracts vocabulary from all sentences for all videos already registered by the user.
+    """
+    videos = db.query(Video).filter(Video.user_id == current_user.id).all()
+    total_created = 0
+    for v in videos:
+        try:
+            created = extract_keywords_for_video(v.id, current_user.id, db, max_keywords=None)
+            total_created += len(created)
+        except Exception as e:
+            print(f"[Vocabulary] Error syncing keywords for video {v.id}: {e}")
+    return {
+        "message": f"Varredura concluída! {total_created} novas palavras foram extraídas de todas as frases dos seus vídeos.",
+        "videos_processed": len(videos),
+        "total_cards_created": total_created
+    }
+
+
 @router.post("/{id}/extract-keywords", response_model=List[SavedPhraseResponse])
 def extract_video_keywords_endpoint(
     id: str,
