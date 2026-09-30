@@ -26,7 +26,10 @@ import {
   MessageSquare,
   Puzzle,
   Send,
-  HelpCircle
+  HelpCircle,
+  Target,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
@@ -59,6 +62,7 @@ export const VideoStudy: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isLoopingSegment, setIsLoopingSegment] = useState(false);
+  const [theaterMode, setTheaterMode] = useState(false);
 
   // Learning Modes
   const [autoScroll, setAutoScroll] = useState(true);
@@ -443,6 +447,107 @@ export const VideoStudy: React.FC = () => {
       }
     } catch (e) {}
   };
+
+  const handlePrevSegment = () => {
+    if (!displayedSegments.length || !playerRef.current) return;
+    const currentIndex = displayedSegments.findIndex((s) => s.id === activeSegmentId);
+    const targetIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+    const targetSeg = displayedSegments[targetIndex];
+    if (targetSeg) {
+      handleSeekToSegment(targetSeg);
+    }
+  };
+
+  const handleNextSegment = () => {
+    if (!displayedSegments.length || !playerRef.current) return;
+    const currentIndex = displayedSegments.findIndex((s) => s.id === activeSegmentId);
+    if (currentIndex >= 0 && currentIndex < displayedSegments.length - 1) {
+      handleSeekToSegment(displayedSegments[currentIndex + 1]);
+    } else if (currentIndex === -1 && displayedSegments.length > 0) {
+      handleSeekToSegment(displayedSegments[0]);
+    }
+  };
+
+  const handleSpeakCurrent = () => {
+    const activeSeg = displayedSegments.find((s) => s.id === activeSegmentId);
+    if (activeSeg) {
+      handleSpeakWord(activeSeg.text);
+    }
+  };
+
+  // Krashen i+1 / Comprehension Index: Palavras únicas do vídeo já salvas pelo usuário
+  const comprehensionStats = useMemo(() => {
+    if (!displayedSegments.length) {
+      return { totalUniqueWords: 0, knownWordsCount: 0, percentage: 0, savedWordsSet: new Set<string>() };
+    }
+    const savedWordsSet = new Set<string>();
+    savedPhrasesList.forEach((p) => {
+      if (p.text) {
+        p.text.toLowerCase().split(/\s+/).forEach((w: string) => {
+          const clean = w.replace(/[^a-zA-Z]/g, '');
+          if (clean.length > 1) savedWordsSet.add(clean);
+        });
+      }
+    });
+
+    const videoWords = new Set<string>();
+    displayedSegments.forEach((seg) => {
+      seg.text.split(/\s+/).forEach((w) => {
+        const clean = w.replace(/[^a-zA-Z]/g, '').toLowerCase();
+        if (clean.length > 2) {
+          videoWords.add(clean);
+        }
+      });
+    });
+
+    let known = 0;
+    videoWords.forEach((word) => {
+      if (savedWordsSet.has(word)) known++;
+    });
+
+    const total = videoWords.size;
+    const percentage = total > 0 ? Math.min(100, Math.round((known / total) * 100)) : 0;
+
+    return {
+      totalUniqueWords: total,
+      knownWordsCount: known,
+      percentage,
+      savedWordsSet
+    };
+  }, [displayedSegments, savedPhrasesList]);
+
+  // Global Keyboard Navigation for English Video Study
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      if (editingSeg || quizSeg || chatOpen) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleTogglePlay();
+      } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevSegment();
+      } else if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        handleRepeatCurrent();
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNextSegment();
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handleSpeakCurrent();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [displayedSegments, activeSegmentId, isPlaying, editingSeg, quizSeg, chatOpen]);
 
   const handleChangePlaybackRate = (rate: number) => {
     if (!playerRef.current || typeof playerRef.current.setPlaybackRate !== 'function') return;
@@ -850,19 +955,51 @@ export const VideoStudy: React.FC = () => {
   }
 
   return (
-    <div className="study-container">
+    <div className={`study-container ${theaterMode ? 'theater-mode' : ''}`}>
       {/* LEFT: Video Player + Controls */}
       <div className="player-column">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-          <button
-            onClick={() => navigate('/videos')}
-            className="btn btn-secondary"
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-          >
-            <ArrowLeft size={15} />
-            <span>Voltar aos Vídeos</span>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <button
+              onClick={() => navigate('/videos')}
+              className="btn btn-secondary"
+              style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+            >
+              <ArrowLeft size={15} />
+              <span>Voltar</span>
+            </button>
+
+            {/* Comprehension Index Badge (Krashen i+1 Input Compreensivel) */}
+            {comprehensionStats.totalUniqueWords > 0 && (
+              <div
+                className="comprehension-meter-pill"
+                title={`Krashen i+1 Input Compreensível: Você já salvou/conhece ${comprehensionStats.knownWordsCount} de ${comprehensionStats.totalUniqueWords} palavras únicas deste vídeo.`}
+              >
+                <Target size={14} color="var(--accent-cyan)" />
+                <span className="comp-label">Compreensão:</span>
+                <span className="comp-pct">{comprehensionStats.percentage}%</span>
+                <div className="comprehension-bar-mini">
+                  <div
+                    className="comprehension-fill-mini"
+                    style={{ width: `${comprehensionStats.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {/* Botao Modo Teatro */}
+            <button
+              onClick={() => setTheaterMode(!theaterMode)}
+              className={`btn btn-secondary ${theaterMode ? 'theater-active' : ''}`}
+              style={{ padding: '0.4rem 0.65rem', fontSize: '0.82rem' }}
+              title={theaterMode ? 'Sair do Modo Teatro' : 'Modo Teatro (Ampliar Player)'}
+            >
+              {theaterMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              <span>{theaterMode ? 'Normal' : 'Teatro'}</span>
+            </button>
+
             {/* Open AI Tutor Chat Button */}
             <button
               onClick={() => setChatOpen(true)}
@@ -960,6 +1097,15 @@ export const VideoStudy: React.FC = () => {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Keyboard Shortcuts Hint Ribbon */}
+        <div className="player-shortcuts-hint">
+          <span className="hint-chip"><kbd>Espaço</kbd> Play/Pause</span>
+          <span className="hint-chip"><kbd>A</kbd> ou <kbd>←</kbd> Anterior</span>
+          <span className="hint-chip"><kbd>S</kbd> Repetir Frase</span>
+          <span className="hint-chip"><kbd>D</kbd> ou <kbd>→</kbd> Próxima</span>
+          <span className="hint-chip"><kbd>R</kbd> Áudio Nativo</span>
         </div>
 
         {/* Video Info Summary */}
@@ -1202,15 +1348,16 @@ export const VideoStudy: React.FC = () => {
                   <div className={`segment-text ${listeningBlur ? 'blurred-text' : ''}`}>
                     {seg.text.split(/\s+/).map((w, wIdx) => {
                       const clean = w.replace(/[^a-zA-Z]/g, '');
+                      const isWordSaved = clean && comprehensionStats.savedWordsSet.has(clean.toLowerCase());
                       return (
                         <span
                           key={wIdx}
-                          className="word-token"
+                          className={`word-token ${isWordSaved ? 'saved-word-highlight' : ''}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (clean) handleWordClick(clean, seg.text);
                           }}
-                          title="Clique para ver o significado e salvar no vocabulário"
+                          title={isWordSaved ? `Palavra salva: "${clean}" (Clique para ver significado)` : "Clique para ver o significado e salvar no vocabulário"}
                         >
                           {w}{' '}
                         </span>

@@ -487,3 +487,124 @@
   pointer-events: none;
 }
 
+/* ==========================================================================
+   Comprehension Index Pill (Krashen i+1 Input Comprehensible)
+   ========================================================================== */
+.comprehension-meter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.65rem;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  border-radius: var(--radius-full);
+  font-size: 0.78rem;
+  cursor: help;
+  user-select: none;
+}
+
+.comprehension-meter-pill .comp-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.comprehension-meter-pill .comp-pct {
+  color: var(--accent-cyan);
+  font-weight: 800;
+}
+
+.comprehension-bar-mini {
+  width: 36px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-left: 2px;
+}
+
+.comprehension-fill-mini {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), #3b82f6);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+/* ==========================================================================
+   Player Keyboard Shortcuts Ribbon
+   ========================================================================== */
+.player-shortcuts-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.player-shortcuts-hint .hint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.player-shortcuts-hint kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  color: #f1f5f9;
+  font-family: monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   Real-Time Saved Words Highlight in Subtitles
+   ========================================================================== */
+.word-token.saved-word-highlight {
+  color: #fbbf24 !important;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(245, 158, 11, 0.45);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 0 2px;
+  transition: all var(--transition-fast);
+}
+
+.word-token.saved-word-highlight:hover {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fef08a !important;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+/* ==========================================================================
+   Theater Mode (Modo Teatro)
+   ========================================================================== */
+.btn.theater-active {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+
+@media (min-width: 992px) {
+  .study-container.theater-mode {
+    max-width: 1500px;
+    grid-template-columns: 1.65fr 0.75fr;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .study-container.theater-mode .video-player-wrapper {
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(99, 102, 241, 0.15);
+  }
+}
+
+
