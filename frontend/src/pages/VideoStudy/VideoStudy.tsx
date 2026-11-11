@@ -81,6 +81,23 @@ export const VideoStudy: React.FC = () => {
   const [savedPhrasesList, setSavedPhrasesList] = useState<any[]>([]);
   const [savingSegmentIds, setSavingSegmentIds] = useState<Record<string, boolean>>({});
 
+  // Pronunciation Evaluation State
+  const [pronResults, setPronResults] = useState<Record<string, { score: number; transcript: string; wordDetails: any[] }>>({});
+  const [evaluatingSegId, setEvaluatingSegId] = useState<string | null>(null);
+
+  // Chunk Selection State (Selecting 2 or more words in transcript)
+  const [selectedWordRange, setSelectedWordRange] = useState<{ segId: string; startIndex: number; endIndex: number } | null>(null);
+
+  // Step-by-Step Learning Modes: 'ALL' (livre) | 'STEP1_BLIND' | 'STEP2_CHUNKS' | 'STEP3_SHADOWING'
+  const [studyStep, setStudyStep] = useState<'ALL' | 'STEP1_BLIND' | 'STEP2_CHUNKS' | 'STEP3_SHADOWING'>('ALL');
+
+  // AB Loop State
+  const [abLoop, setAbLoop] = useState<{ pointA: number | null; pointB: number | null; active: boolean }>({
+    pointA: null,
+    pointB: null,
+    active: false,
+  });
+
   // Word Click Lookup Modal
   const [wordModalData, setWordModalData] = useState<WordInfoResponse | null>(null);
   const [loadingWord, setLoadingWord] = useState(false);
@@ -320,9 +337,16 @@ export const VideoStudy: React.FC = () => {
                 return;
               }
 
-              // Loop mode: repeat active sentence
+          // Loop mode: repeat active sentence
               if (isLoopingSegment && time >= seg.end_time - 0.2) {
                 playerRef.current.seekTo(seg.start_time, true);
+              }
+
+              // AB Loop: repeat custom region
+              if (abLoop.active && abLoop.pointA !== null && abLoop.pointB !== null) {
+                if (time >= abLoop.pointB || time < abLoop.pointA) {
+                  playerRef.current.seekTo(abLoop.pointA, true);
+                }
               }
             }
           }
@@ -589,6 +613,66 @@ export const VideoStudy: React.FC = () => {
     }
   };
 
+  // Save Selected Multi-word Chunk / Expression to Deck
+  const handleSaveChunk = async (seg: TranscriptSegment, phraseType: 'EXPRESSION' | 'PHRASAL_VERB' = 'EXPRESSION') => {
+    if (!video || !selectedWordRange || selectedWordRange.segId !== seg.id) return;
+    const words = seg.text.split(/\s+/);
+    const chunkWords = words.slice(selectedWordRange.startIndex, selectedWordRange.endIndex + 1);
+    const chunkText = chunkWords.join(' ').replace(/^[.,;:!?]+|[.,;:!?]+$/g, '').trim();
+
+    if (!chunkText) return;
+
+    try {
+      setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: true }));
+      let trans = '';
+      try {
+        const res = await aiService.translate(chunkText);
+        trans = res.translation;
+      } catch (e) {}
+
+      await phraseService.savePhrase({
+        video_id: video.id,
+        transcript_segment_id: seg.id,
+        text: chunkText,
+        translation: trans || null,
+        context_sentence: seg.text,
+        timestamp: seg.start_time,
+        phrase_type: phraseType,
+        difficulty: 'NORMAL',
+      });
+
+      setSelectedWordRange(null);
+      alert(`🎉 Expressão "${chunkText}" salva com sucesso no seu Deck de Estudos!`);
+    } catch (err: any) {
+      alert(err.message || 'Falha ao salvar expressão.');
+    } finally {
+      setSavingSegmentIds((prev) => ({ ...prev, [seg.id]: false }));
+    }
+  };
+
+  // Set Point A for AB Loop
+  const handleSetLoopPointA = () => {
+    setAbLoop((prev) => ({
+      ...prev,
+      pointA: Math.round(currentTime * 10) / 10,
+      active: prev.pointB !== null && (prev.pointB > (Math.round(currentTime * 10) / 10)),
+    }));
+  };
+
+  // Set Point B for AB Loop
+  const handleSetLoopPointB = () => {
+    setAbLoop((prev) => ({
+      ...prev,
+      pointB: Math.round(currentTime * 10) / 10,
+      active: prev.pointA !== null && ((Math.round(currentTime * 10) / 10) > prev.pointA),
+    }));
+  };
+
+  // Clear AB Loop
+  const handleClearAbLoop = () => {
+    setAbLoop({ pointA: null, pointB: null, active: false });
+  };
+
   // Save Single Word into Word Deck
   const handleSaveWordToDeck = async () => {
     if (!wordModalData || !video) return;
@@ -700,7 +784,7 @@ export const VideoStudy: React.FC = () => {
     }
   };
 
-  // Voice Recording Toggle for Segment
+  // Voice Recording Toggle for Segment with Automatic Pronunciation Scoring
   const handleToggleRecord = async (seg: TranscriptSegment, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -709,6 +793,7 @@ export const VideoStudy: React.FC = () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
+      speechService.stopPronunciationEvaluation();
       setRecordingSegId(null);
       return;
     }
@@ -734,9 +819,41 @@ export const VideoStudy: React.FC = () => {
 
       mediaRecorder.start();
       setRecordingSegId(seg.id);
+      setEvaluatingSegId(seg.id);
+
+      // Start automatic Speech-to-Text pronunciation evaluation
+      speechService.startPronunciationEvaluation(seg.text, {
+        onResult: (result) => {
+          setPronResults((prev) => ({ ...prev, [seg.id]: result }));
+          setEvaluatingSegId(null);
+        },
+        onError: () => {
+          setEvaluatingSegId(null);
+        },
+        onEnd: () => {
+          setEvaluatingSegId(null);
+        }
+      });
     } catch (err) {
       alert('Permissão de microfone não concedida ou dispositivo não disponível.');
     }
+  };
+
+  // Play User Audio after Native Audio (Automatic 1-2 Comparison)
+  const handleCompareAudioSequentially = (seg: TranscriptSegment, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const userAudioUrl = userAudioUrls[seg.id];
+    if (!userAudioUrl) return;
+
+    // 1. Play native video segment first
+    handlePlaySegmentOnly(seg);
+
+    // 2. Play student's audio right after segment finishes
+    const duration = (seg.end_time - seg.start_time) * 1000;
+    setTimeout(() => {
+      const userAudio = new Audio(userAudioUrl);
+      userAudio.play();
+    }, Math.max(800, duration + 200));
   };
 
   const handlePlayUserVoice = (segId: string, e: React.MouseEvent) => {
@@ -1013,6 +1130,69 @@ export const VideoStudy: React.FC = () => {
           </div>
         </div>
 
+        {/* Mr. English Channel Step-by-Step Methodology Selector */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '0.35rem',
+          background: 'rgba(15, 23, 42, 0.6)',
+          padding: '0.35rem',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--border-subtle)',
+          marginBottom: '0.65rem'
+        }}>
+          <button
+            onClick={() => {
+              setStudyStep('ALL');
+              setListeningBlur(false);
+              setAutoPauseMode(false);
+            }}
+            className={`btn ${studyStep === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.35rem 0.2rem', fontSize: '0.74rem', border: 'none' }}
+          >
+            <span>🌐 Estudo Livre</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setStudyStep('STEP1_BLIND');
+              setListeningBlur(true);
+              setAutoPauseMode(false);
+            }}
+            className={`btn ${studyStep === 'STEP1_BLIND' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.35rem 0.2rem', fontSize: '0.74rem', border: 'none' }}
+            title="Passo 1: Foco auditivo sem ler legendas"
+          >
+            <span>🎧 1. Treino Auditivo</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setStudyStep('STEP2_CHUNKS');
+              setListeningBlur(false);
+              setAutoPauseMode(false);
+            }}
+            className={`btn ${studyStep === 'STEP2_CHUNKS' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.35rem 0.2rem', fontSize: '0.74rem', border: 'none' }}
+            title="Passo 2: Analisar vocabulário, conectores e chunks"
+          >
+            <span>🧩 2. Expressões</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setStudyStep('STEP3_SHADOWING');
+              setListeningBlur(false);
+              setAutoPauseMode(true);
+            }}
+            className={`btn ${studyStep === 'STEP3_SHADOWING' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.35rem 0.2rem', fontSize: '0.74rem', border: 'none' }}
+            title="Passo 3: Auto-pausa ao final de cada frase para falar e gravar sua voz"
+          >
+            <span>🎙️ 3. Shadowing</span>
+          </button>
+        </div>
+
         {/* Video Player Box */}
         <div className="video-player-wrapper" ref={containerRef}>
           <div id="yt-study-player" />
@@ -1064,7 +1244,7 @@ export const VideoStudy: React.FC = () => {
             </button>
           </div>
 
-          {/* Repeat Current Sentence & Loop Mode */}
+          {/* Repeat Current Sentence & Loop Mode & AB Loop */}
           <div className="controls-group">
             <button
               onClick={handleRepeatCurrent}
@@ -1082,6 +1262,34 @@ export const VideoStudy: React.FC = () => {
               <Repeat size={15} />
               <span>Loop {isLoopingSegment ? 'ON' : 'OFF'}</span>
             </button>
+
+            {/* AB Loop Controls */}
+            <button
+              onClick={handleSetLoopPointA}
+              className={`control-btn ${abLoop.pointA !== null ? 'active' : ''}`}
+              style={{ fontSize: '0.74rem', padding: '0.35rem 0.5rem' }}
+              title="Definir início do trecho (Ponto A)"
+            >
+              A {abLoop.pointA !== null ? `${abLoop.pointA}s` : ''}
+            </button>
+            <button
+              onClick={handleSetLoopPointB}
+              className={`control-btn ${abLoop.pointB !== null ? 'active' : ''}`}
+              style={{ fontSize: '0.74rem', padding: '0.35rem 0.5rem' }}
+              title="Definir fim do trecho (Ponto B)"
+            >
+              B {abLoop.pointB !== null ? `${abLoop.pointB}s` : ''}
+            </button>
+            {abLoop.active && (
+              <button
+                onClick={handleClearAbLoop}
+                className="control-btn"
+                style={{ color: 'var(--accent-rose)', fontSize: '0.74rem' }}
+                title="Desativar loop A-B"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
 
           {/* Speed Selector */}
@@ -1285,6 +1493,18 @@ export const VideoStudy: React.FC = () => {
                         </button>
                       )}
 
+                      {/* Comparação Automática 1-2: Vídeo Nativo -> Minha Voz */}
+                      {userVoiceUrl && (
+                        <button
+                          className="action-btn"
+                          onClick={(e) => handleCompareAudioSequentially(seg, e)}
+                          title="Comparar: Ouve o áudio nativo e em seguida sua voz"
+                          style={{ color: 'var(--accent-cyan)' }}
+                        >
+                          <Repeat size={14} />
+                        </button>
+                      )}
+
                       {/* Ditado / Desafio Quiz */}
                       <button
                         className="action-btn"
@@ -1344,26 +1564,121 @@ export const VideoStudy: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* English Sentence with Clickable Words & Blur Mode */}
+                  {/* English Sentence with Clickable Words, Chunk Selection & Blur Mode */}
                   <div className={`segment-text ${listeningBlur ? 'blurred-text' : ''}`}>
                     {seg.text.split(/\s+/).map((w, wIdx) => {
                       const clean = w.replace(/[^a-zA-Z]/g, '');
                       const isWordSaved = clean && comprehensionStats.savedWordsSet.has(clean.toLowerCase());
+                      const isChunkSelected =
+                        selectedWordRange &&
+                        selectedWordRange.segId === seg.id &&
+                        wIdx >= selectedWordRange.startIndex &&
+                        wIdx <= selectedWordRange.endIndex;
+
                       return (
                         <span
                           key={wIdx}
-                          className={`word-token ${isWordSaved ? 'saved-word-highlight' : ''}`}
+                          className={`word-token ${isWordSaved ? 'saved-word-highlight' : ''} ${isChunkSelected ? 'chunk-selected-highlight' : ''}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (clean) handleWordClick(clean, seg.text);
+                            if (e.shiftKey) {
+                              // Shift+Click: Extend multi-word chunk selection!
+                              if (selectedWordRange && selectedWordRange.segId === seg.id) {
+                                setSelectedWordRange({
+                                  segId: seg.id,
+                                  startIndex: Math.min(selectedWordRange.startIndex, wIdx),
+                                  endIndex: Math.max(selectedWordRange.endIndex, wIdx),
+                                });
+                              } else {
+                                setSelectedWordRange({ segId: seg.id, startIndex: wIdx, endIndex: wIdx });
+                              }
+                            } else {
+                              if (clean) handleWordClick(clean, seg.text);
+                            }
                           }}
-                          title={isWordSaved ? `Palavra salva: "${clean}" (Clique para ver significado)` : "Clique para ver o significado e salvar no vocabulário"}
+                          title={
+                            isWordSaved
+                              ? `Palavra salva: "${clean}" (Clique para ver significado / Shift+Clique para selecionar expressão)`
+                              : "Clique para traduzir ou Shift+Clique para selecionar bloco de palavras (chunk)"
+                          }
                         >
                           {w}{' '}
                         </span>
                       );
                     })}
                   </div>
+
+                  {/* Chunk Selection Actions Toolbar if user selected 2+ words */}
+                  {selectedWordRange && selectedWordRange.segId === seg.id && (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      border: '1px solid rgba(99, 102, 241, 0.4)',
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: 'var(--radius-sm)',
+                      marginTop: '0.4rem',
+                      fontSize: '0.78rem'
+                    }} onClick={(e) => e.stopPropagation()}>
+                      <span style={{ fontWeight: 700, color: 'var(--primary-light)' }}>
+                        Expressão selecionada ({selectedWordRange.endIndex - selectedWordRange.startIndex + 1} palavras)
+                      </span>
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.74rem' }}
+                        onClick={() => handleSaveChunk(seg, 'EXPRESSION')}
+                      >
+                        Salvar Expressão
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.2rem 0.4rem', fontSize: '0.74rem' }}
+                        onClick={() => setSelectedWordRange(null)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Pronunciation Recognition Feedback Score */}
+                  {pronResults[seg.id] && (
+                    <div style={{
+                      marginTop: '0.45rem',
+                      padding: '0.4rem 0.65rem',
+                      borderRadius: 'var(--radius-sm)',
+                      background: pronResults[seg.id].score >= 70 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                      border: `1px solid ${pronResults[seg.id].score >= 70 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span style={{ fontWeight: 800, color: pronResults[seg.id].score >= 70 ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
+                          Pronúncia: {pronResults[seg.id].score}%
+                        </span>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          (Reconhecido: "{pronResults[seg.id].transcript}")
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPronResults((prev) => {
+                            const next = { ...prev };
+                            delete next[seg.id];
+                            return next;
+                          });
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Inline Translation if active */}
                   {translation && (

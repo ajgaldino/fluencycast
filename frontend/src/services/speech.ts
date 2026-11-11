@@ -9,10 +9,109 @@ export interface SpeakOptions {
   onError?: (err: any) => void;
 }
 
+export interface PronunciationScoreResult {
+  score: number; // 0 to 100
+  transcript: string;
+  wordDetails: Array<{
+    word: string;
+    matched: boolean;
+  }>;
+}
+
+export interface SpeechRecognitionListener {
+  onResult?: (result: PronunciationScoreResult) => void;
+  onError?: (error: any) => void;
+  onEnd?: () => void;
+}
+
 class SpeechService {
   private currentAudio: HTMLAudioElement | null = null;
   private audioCache = new Map<string, string>();
   private preferredVoice: string = 'male'; // 'male' (Christopher) or 'female' (Jenny)
+  private recognitionInstance: any = null;
+
+  /**
+   * Start Speech Recognition to evaluate student's spoken pronunciation
+   */
+  startPronunciationEvaluation(expectedText: string, listeners: SpeechRecognitionListener) {
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      listeners.onError?.(new Error('Navegador sem suporte a Web Speech Recognition. Use o Chrome ou Edge.'));
+      return;
+    }
+
+    try {
+      this.stopPronunciationEvaluation();
+      const rec = new SpeechRecognition();
+      rec.lang = 'en-US';
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+
+      rec.onresult = (event: any) => {
+        const spoken = event.results?.[0]?.[0]?.transcript || '';
+        const evaluated = this.evaluatePronunciationScore(expectedText, spoken);
+        listeners.onResult?.(evaluated);
+      };
+
+      rec.onerror = (e: any) => {
+        listeners.onError?.(e);
+      };
+
+      rec.onend = () => {
+        listeners.onEnd?.();
+      };
+
+      this.recognitionInstance = rec;
+      rec.start();
+    } catch (err) {
+      listeners.onError?.(err);
+    }
+  }
+
+  stopPronunciationEvaluation() {
+    if (this.recognitionInstance) {
+      try {
+        this.recognitionInstance.abort();
+      } catch (e) {}
+      this.recognitionInstance = null;
+    }
+  }
+
+  /**
+   * Compares expected sentence with recognized spoken words and assigns 0-100% score
+   */
+  evaluatePronunciationScore(expected: string, spoken: string): PronunciationScoreResult {
+    const cleanWords = (s: string) =>
+      s.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const expList = cleanWords(expected);
+    const spokenList = cleanWords(spoken);
+    const spokenSet = new Set(spokenList);
+
+    if (expList.length === 0) {
+      return { score: 100, transcript: spoken, wordDetails: [] };
+    }
+
+    let matchCount = 0;
+    const details = expList.map((word) => {
+      const matched = spokenSet.has(word);
+      if (matched) matchCount++;
+      return { word, matched };
+    });
+
+    const score = Math.round((matchCount / expList.length) * 100);
+    return {
+      score,
+      transcript: spoken,
+      wordDetails: details,
+    };
+  }
 
   /**
    * Set preferred voice globally (male or female natural voice)

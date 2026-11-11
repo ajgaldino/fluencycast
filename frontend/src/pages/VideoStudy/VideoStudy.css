@@ -342,6 +342,14 @@
   font-weight: 600;
 }
 
+.chunk-selected-highlight {
+  background: rgba(99, 102, 241, 0.45) !important;
+  color: #ffffff !important;
+  border-radius: 4px;
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
+  font-weight: 700;
+}
+
 /* Translation display */
 .segment-translation {
   font-size: 0.86rem;

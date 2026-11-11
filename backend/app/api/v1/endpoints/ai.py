@@ -395,16 +395,47 @@ def explain_text(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Provides a concise, practical English explanation.
+    Provides a concise, practical English explanation focusing on:
+    - Meaning in context
+    - Natural breakdown of chunks/phrasal verbs
+    - Pronunciation and connected speech tip
     """
     sentence = payload.text.strip()
+    words = sentence.split()
+    lower_s = sentence.lower()
+
+    # Detect common structures or phrasal verbs
+    phrasal_tips = []
+    from app.services.vocabulary import COMMON_PHRASAL_VERBS_AND_CHUNKS
+    for chunk in COMMON_PHRASAL_VERBS_AND_CHUNKS:
+        if re.search(r'\b' + re.escape(chunk) + r'\b', lower_s):
+            phrasal_tips.append(chunk)
+
+    chunks_explanation = ""
+    if phrasal_tips:
+        chunks_explanation = f" Destaca-se a expressão/phrasal verb '{', '.join(phrasal_tips)}', muito frequente no inglês diário."
+
+    # Connected speech / pronunciation tip
+    pron_tip = ""
+    if re.search(r'\b(gonna|wanna|gotta|kinda)\b', lower_s):
+        pron_tip = " Note o uso de reduções de fala conectada (ex: gonna/wanna), que tornam o ritmo mais rápido e informal."
+    elif re.search(r'\b(to|at|for|of|and)\b', lower_s):
+        pron_tip = " Em inglês falado, preposições curtas como 'to', 'at' ou 'for' costumam ser pronunciadas de forma reduzida (som 'schwa' /ə/)."
+
+    explanation = (
+        f"A frase '{sentence}' expressa uma ideia natural do inglês conversacional cotidiana.{chunks_explanation}"
+        f"{pron_tip} Em vez de traduzir palavra por palavra, memorize o padrão como um bloco único para pensar diretamente em inglês."
+    )
+
+    examples = [
+        f"In real conversations, you can adapt this pattern naturally: '{sentence}'",
+        f"Practice shadowing this exact rhythm aloud to train your mouth muscles."
+    ]
+
     return ExplainResponse(
         sentence=sentence,
-        explanation=f"A frase '{sentence}' expressa uma ideia contextual em inglês conversacional comum.",
-        examples=[
-            "I used to travel a lot when I was younger.",
-            "That explains why they acted that way."
-        ]
+        explanation=explanation,
+        examples=examples
     )
 
 
@@ -585,29 +616,44 @@ def chat_with_tutor(
     Contextual AI Tutor for questions regarding grammar, phrases, and video dialogue.
     """
     user_msg = payload.message.strip().lower()
-    ctx = payload.context or ""
+    ctx = (payload.context or "").strip()
+
+    from app.services.vocabulary import COMMON_PHRASAL_VERBS_AND_CHUNKS
+
+    # Check if context contains phrasal verbs
+    found_chunks = [c for c in COMMON_PHRASAL_VERBS_AND_CHUNKS if re.search(r'\b' + re.escape(c) + r'\b', ctx.lower())]
 
     if "por que" in user_msg or "why" in user_msg:
         reply = (
-            f"Excelente pergunta! No inglês natural e conversacional, falantes nativos usam estruturas "
-            f"como '{ctx[:60]}...' por uma questão de ritmo e padrão idiomático. "
-            f"Dica: Pratique a frase inteira com o Modo Shadowing para fixar a entonação."
+            f"No inglês real, usamos estruturas como '{ctx[:50]}...' por uma questão de fluidez natural e ritmo. "
+            f"Falantes nativos evitam traduções literais e usam blocos prontos (chunks). "
+            f"Dica de ouro do Mr. English Channel: repita a frase em voz alta 3 vezes focando na melodia da fala!"
         )
-    elif "significa" in user_msg or "meaning" in user_msg:
+    elif "chunk" in user_msg or "expressão" in user_msg or "expressao" in user_msg or "phrasal" in user_msg:
+        if found_chunks:
+            reply = f"Neste trecho temos a expressão/phrasal verb de ouro: '{found_chunks[0]}'. Guarde o bloco inteiro em vez de traduzir cada palavra separadamente!"
+        else:
+            reply = f"Em '{ctx[:45]}...', tente memorizar as palavras juntas como uma ideia única para pensar mais rápido sem traduzir."
+    elif "pronúncia" in user_msg or "pronuncia" in user_msg or "falar" in user_msg or "som" in user_msg:
         reply = (
-            f"No trecho que você está assistindo, essa expressão indica uma intenção direta ou estado emocional. "
-            f"É muito usada em reuniões, conversas informais ou podcasts."
+            f"Dica de pronúncia para '{ctx[:45]}...': atente-se às junções de palavras (connected speech). "
+            f"Palavras que terminam em som de consoante costumam se ligar à palavra seguinte se ela começar com som de vogal."
         )
     elif "exemplo" in user_msg or "example" in user_msg:
         reply = (
             f"Aqui estão 2 exemplos adicionais para seu repertório:\n"
-            f"1. 'It's really exhausting to deal with this every day.'\n"
-            f"2. 'She set clear boundaries from the very beginning.'"
+            f"1. 'It's totally normal to feel that way at first.'\n"
+            f"2. 'We need to figure out what happened as soon as possible.'"
+        )
+    elif "significa" in user_msg or "meaning" in user_msg:
+        reply = (
+            f"No contexto de '{ctx[:50]}...', essa expressão comunica uma ideia prática do dia a dia. "
+            f"Recomendo clicar na palavra ou salvar a frase para fixar no modo Cloze de repetição espaçada!"
         )
     else:
         reply = (
-            f"Ótima observação sobre '{ctx[:50]}...'. Essa é uma frase super autêntica do inglês cotidiano. "
-            f"Recomendo clicar em '⭐ Salvar' para que ela entre nas suas revisões espaçadas!"
+            f"Excelente observação sobre '{ctx[:50]}...'. Essa é uma frase super autêntica! "
+            f"Pratique com o botão de Gravação de Voz (Shadowing) para comparar sua pronúncia e ritmo com o áudio nativo."
         )
 
     return ChatResponse(reply=reply)

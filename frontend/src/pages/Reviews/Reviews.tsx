@@ -222,8 +222,8 @@ export const Reviews: React.FC = () => {
   // Video Filter: 'ALL' or specific video ID
   const [selectedVideoId, setSelectedVideoId] = useState<string>(urlVideoId);
   const [videosList, setVideosList] = useState<Video[]>([]);
-  // Study Method: Multiple Choice (Simpler/Memrise) as default vs Classic Flashcard vs Type-to-Answer
-  const [studyMethod, setStudyMethod] = useState<'CHOICE' | 'FLASHCARD' | 'TYPE'>('CHOICE');
+  // Study Method: Multiple Choice vs Classic Flashcard vs Type-to-Answer vs Cloze Context Fill
+  const [studyMethod, setStudyMethod] = useState<'CHOICE' | 'FLASHCARD' | 'TYPE' | 'CLOZE'>('CHOICE');
   // Review Scope: 'DUE' (somente agendadas/disponíveis) vs 'ALL' (todas as salvas/prática livre)
   const [reviewScope, setReviewScope] = useState<'DUE' | 'ALL'>('DUE');
   const [dueCount, setDueCount] = useState<number>(0);
@@ -1183,6 +1183,22 @@ export const Reviews: React.FC = () => {
           >
             ✍️ Digitação
           </button>
+          <button
+            onClick={() => setStudyMethod('CLOZE')}
+            style={{
+              flex: 1.1,
+              padding: '0.4rem 0.6rem',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: studyMethod === 'CLOZE' ? 'rgba(245, 158, 11, 0.3)' : 'transparent',
+              color: studyMethod === 'CLOZE' ? '#fff' : 'var(--text-muted)'
+            }}
+          >
+            🧩 Cloze (Lacuna)
+          </button>
         </div>
 
         {/* Progress Bar with card counter */}
@@ -1432,6 +1448,29 @@ export const Reviews: React.FC = () => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  {/* Master in 1-Click Button */}
+                  <button
+                    onClick={() => handleGrade(4)}
+                    className="action-btn"
+                    title="Já conheço muito bem esta palavra/frase! (Marcar como Dominada e arquivar)"
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.15)',
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.35rem 0.55rem',
+                      color: 'var(--accent-emerald)',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Já Domino</span>
+                  </button>
+
                   {/* Edit Phrase Button */}
                   <button
                     onClick={handleOpenEdit}
@@ -1730,6 +1769,76 @@ export const Reviews: React.FC = () => {
                 >
                   Continuar
                 </button>
+              </div>
+            )}
+
+            {/* METHOD 4: CLOZE CONTEXT GAP FILL (Mr. English In-Context Recall) */}
+            {studyMethod === 'CLOZE' && (
+              <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: '0.65rem', fontWeight: 700 }}>
+                  🧩 Complete a lacuna da frase real do vídeo:
+                </div>
+                <div style={{
+                  padding: '1rem',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '1.15rem',
+                  lineHeight: 1.6,
+                  marginBottom: '1rem'
+                }}>
+                  {(() => {
+                    const ctx = currentPhrase.context_sentence || currentPhrase.text;
+                    const target = currentPhrase.text.trim();
+                    const regex = new RegExp(`\\b${target.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
+                    if (regex.test(ctx) && showTranslation) {
+                      return (
+                        <span>
+                          {ctx.split(regex)[0]}
+                          <strong style={{ color: 'var(--accent-emerald)', textDecoration: 'underline' }}>{target}</strong>
+                          {ctx.split(regex)[1]}
+                        </span>
+                      );
+                    } else if (regex.test(ctx)) {
+                      return (
+                        <span>
+                          {ctx.split(regex)[0]}
+                          <span style={{ color: 'var(--accent-amber)', fontWeight: 800, borderBottom: '2px dashed var(--accent-amber)', padding: '0 0.4rem' }}>
+                            [ _______ ]
+                          </span>
+                          {ctx.split(regex)[1]}
+                        </span>
+                      );
+                    }
+                    return <span>"{ctx}"</span>;
+                  })()}
+                </div>
+
+                <div style={{ fontSize: '0.84rem', color: 'var(--accent-cyan)', marginBottom: '1rem' }}>
+                  Dica / Sentido: <strong>{getResolvedTranslation(currentPhrase)}</strong>
+                </div>
+
+                {!showTranslation ? (
+                  <button
+                    onClick={() => {
+                      setShowTranslation(true);
+                      sfx.playFlip();
+                    }}
+                    className="simpler-btn"
+                    style={{ background: 'var(--gradient-primary)', color: '#fff', padding: '0.75rem 1.5rem', margin: '0 auto' }}
+                  >
+                    <span>Revelar Palavra Oculta</span>
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '0.6rem', marginTop: '0.75rem' }}>
+                    <button onClick={() => handleGrade(1)} className="btn btn-secondary" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }}>
+                      Não lembrei
+                    </button>
+                    <button onClick={() => handleGrade(3)} className="btn btn-primary" style={{ background: 'var(--accent-emerald)', border: 'none' }}>
+                      Lembrei com facilidade! (+15 XP)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

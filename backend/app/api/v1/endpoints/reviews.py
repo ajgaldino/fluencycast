@@ -205,6 +205,10 @@ def submit_phrase_review(
             phrase.status = "MASTERED"
         else:
             phrase.status = "REVIEW"
+    elif q == 4 or q >= 10:  # Instantly master card (Retire / Já Domino)
+        phrase.repetitions = max(5, phrase.repetitions + 5)
+        phrase.interval_days = max(45, phrase.interval_days * 3)
+        phrase.status = "MASTERED"
 
     phrase.last_reviewed_at = now
     phrase.next_review_at = now + timedelta(days=phrase.interval_days)
