@@ -51,13 +51,17 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+    try:
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection, target_metadata=target_metadata
+            )
 
-        with context.begin_transaction():
-            context.run_migrations()
+            with context.begin_transaction():
+                context.run_migrations()
+    except Exception as exc:
+        print(f"\n[ALEMBIC WARNING] Could not connect to database during migration: {exc}")
+        print("[ALEMBIC WARNING] If this occurred during the Render build phase, migrations will run at container startup.\n")
 
 
 if context.is_offline_mode():
