@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import traceback
 
 from app.api.v1.api import api_router
 from app.core.config import settings
@@ -30,6 +32,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Global exception handler to guarantee CORS headers on 500 errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_trace = traceback.format_exc()
+    print(f"[UNHANDLED EXCEPTION] {request.method} {request.url.path}: {exc}\n{error_trace}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
 # Setup CORS
 app.add_middleware(
     CORSMiddleware,
@@ -53,4 +70,18 @@ def root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    db_status = "ok"
+    db_error = None
+    try:
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text("SELECT 1;"))
+    except Exception as e:
+        db_status = "error"
+        db_error = str(e)
+
+    return {
+        "status": "healthy" if db_status == "ok" else "degraded",
+        "database": db_status,
+        "db_error": db_error
+    }
