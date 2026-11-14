@@ -23,11 +23,15 @@ class Settings(BaseSettings):
     def sync_database_url(self) -> str:
         url = self.DATABASE_URL
         if url:
-            # Render provides 'postgres://', SQLAlchemy 2 requires 'postgresql://'
+            # Render provides 'postgres://' or 'postgresql://'
+            # In SQLAlchemy 2+, postgresql:// without driver looks for psycopg (v3).
+            # We explicitly specify postgresql+psycopg2://
             if url.startswith("postgres://"):
-                url = url.replace("postgres://", "postgresql://", 1)
+                url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+            elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
+                url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
             return url
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
     # CORS
     BACKEND_CORS_ORIGINS: Union[List[str], str] = [
