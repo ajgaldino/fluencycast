@@ -157,15 +157,20 @@ export const videoService = {
     return finalResult;
   },
 
-  async extractKeywords(videoId: string, limit?: number): Promise<any[]> {
-    const query = limit ? `?limit=${limit}` : '';
+  async extractKeywords(videoId: string, limit?: number, refresh = false): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', String(limit));
+    if (refresh) params.set('refresh', 'true');
+    const qs = params.toString();
+    const query = qs ? `?${qs}` : '';
     return request<any[]>(`/videos/${videoId}/extract-keywords${query}`, {
       method: 'POST',
     });
   },
 
-  async syncAllKeywords(): Promise<{ message: string; videos_processed: number; total_cards_created: number }> {
-    return request('/videos/sync-all-keywords', {
+  async syncAllKeywords(refresh = false): Promise<{ message: string; videos_processed: number; total_cards_created: number }> {
+    const query = refresh ? '?refresh=true' : '';
+    return request(`/videos/sync-all-keywords${query}`, {
       method: 'POST',
     });
   },

@@ -1,7 +1,7 @@
 import json
 import traceback
 from typing import Any, Iterator, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -139,22 +139,29 @@ def create_video(
 
 @router.post("/sync-all-keywords")
 def sync_all_videos_keywords(
+    refresh: bool = Query(False, description="Rebuild unreviewed auto-extracted flashcards across all videos"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Extracts vocabulary from all sentences for all videos already registered by the user.
+    Extracts (or refreshes when refresh=true) vocabulary from all sentences across all user videos.
     """
     videos = db.query(Video).filter(Video.user_id == current_user.id).all()
     total_created = 0
     for v in videos:
         try:
-            created = extract_keywords_for_video(v.id, current_user.id, db, max_keywords=None)
+            created = extract_keywords_for_video(
+                v.id, current_user.id, db, max_keywords=None, refresh=refresh
+            )
             total_created += len(created)
         except Exception as e:
             print(f"[Vocabulary] Error syncing keywords for video {v.id}: {e}")
     return {
-        "message": f"Varredura concluída! {total_created} novas palavras foram extraídas de todas as frases dos seus vídeos.",
+        "message": (
+            f"Reotimização concluída! {total_created} flashcards atualizados cobrindo todos os seus vídeos."
+            if refresh
+            else f"Varredura concluída! {total_created} novas palavras foram extraídas de todas as frases dos seus vídeos."
+        ),
         "videos_processed": len(videos),
         "total_cards_created": total_created
     }
@@ -164,6 +171,7 @@ def sync_all_videos_keywords(
 def extract_video_keywords_endpoint(
     id: str,
     limit: Optional[int] = None,
+    refresh: bool = Query(False, description="Rebuild unreviewed auto-extracted flashcards for this video"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
@@ -178,7 +186,9 @@ def extract_video_keywords_endpoint(
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    created = extract_keywords_for_video(video.id, current_user.id, db, max_keywords=limit)
+    created = extract_keywords_for_video(
+        video.id, current_user.id, db, max_keywords=limit, refresh=refresh
+    )
     return created
 
 

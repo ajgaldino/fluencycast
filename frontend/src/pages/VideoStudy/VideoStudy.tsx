@@ -29,13 +29,28 @@ import {
   HelpCircle,
   Target,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Headphones,
+  Sun,
+  Music,
+  Upload,
+  SkipBack,
+  SkipForward,
+  Square
 } from 'lucide-react';
 import { videoService } from '../../services/videos';
 import { phraseService } from '../../services/phrases';
 import { aiService, ExplainResponse, WordInfoResponse } from '../../services/ai';
 import { Video, TranscriptSegment } from '../../types/video';
 import { speechService } from '../../services/speech';
+import {
+  backgroundAudioService,
+  BackgroundAudioSnapshot,
+  isWakeLockSupported,
+  PodcastSubMode,
+  PodcastVoice,
+  setScreenWakeLock,
+} from '../../services/backgroundAudio';
 import './VideoStudy.css';
 
 declare global {
@@ -144,6 +159,15 @@ export const VideoStudy: React.FC = () => {
   const activeCardRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<any>(null);
   const pauseAtTimeRef = useRef<number | null>(null);
+  const localAudioInputRef = useRef<HTMLInputElement | null>(null);
+  const displayedSegmentsRef = useRef<TranscriptSegment[]>([]);
+
+  // Mobile Background Audio & Screen Wake Lock
+  const [bgPanelOpen, setBgPanelOpen] = useState(false);
+  const [bgTab, setBgTab] = useState<'podcast' | 'local'>('podcast');
+  const [bgState, setBgState] = useState<BackgroundAudioSnapshot>(() => backgroundAudioService.getSnapshot());
+  const [wakeLockOn, setWakeLockOn] = useState(false);
+  const wakeLockAvailable = isWakeLockSupported();
 
   // 1. Fetch Video & Saved Phrases
   useEffect(() => {
@@ -209,6 +233,34 @@ export const VideoStudy: React.FC = () => {
     });
   }, [video?.segments]);
 
+  useEffect(() => {
+    displayedSegmentsRef.current = displayedSegments;
+  }, [displayedSegments]);
+
+  useEffect(() => {
+    const unsubSnap = backgroundAudioService.subscribe(setBgState);
+    const unsubSeg = backgroundAudioService.onSegmentChange((seg) => {
+      setActiveSegmentId(seg.id);
+      setCurrentTime(seg.start_time);
+    });
+    const unsubTime = backgroundAudioService.onLocalTimeUpdate((t) => {
+      setCurrentTime(t);
+      const segs = displayedSegmentsRef.current;
+      const match = segs.find((s) => t >= s.start_time && t < s.end_time);
+      if (match) {
+        setActiveSegmentId(match.id);
+      }
+    });
+
+    return () => {
+      unsubSnap();
+      unsubSeg();
+      unsubTime();
+      backgroundAudioService.stop();
+      setScreenWakeLock(false).catch(() => {});
+    };
+  }, []);
+
   // 2. Initialize YouTube IFrame Player
   useEffect(() => {
     if (!video || !video.youtube_id) return;
@@ -257,6 +309,9 @@ export const VideoStudy: React.FC = () => {
               if (event.data === 1) {
                 setIsPlaying(true);
                 setIsPausedForShadowing(false);
+                if (backgroundAudioService.getSnapshot().isPlaying) {
+                  backgroundAudioService.pause();
+                }
               } else {
                 setIsPlaying(false);
               }
@@ -435,6 +490,22 @@ export const VideoStudy: React.FC = () => {
   };
 
   const handleSeekToSegment = (seg: TranscriptSegment) => {
+    if (bgState.mode === 'podcast') {
+      const idx = displayedSegments.findIndex((s) => s.id === seg.id);
+      if (idx >= 0) {
+        backgroundAudioService.jumpToPodcastSegment(idx);
+      }
+      return;
+    }
+    if (bgState.mode === 'local') {
+      backgroundAudioService.seekLocalTo(seg.start_time);
+      if (!bgState.isPlaying) {
+        backgroundAudioService.resume();
+      }
+      setActiveSegmentId(seg.id);
+      return;
+    }
+
     if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
     try {
       pauseAtTimeRef.current = null;
@@ -443,6 +514,51 @@ export const VideoStudy: React.FC = () => {
       playerRef.current.seekTo(seg.start_time, true);
       playerRef.current.playVideo();
     } catch (e) {}
+  };
+
+  const pauseYoutubeIfPlaying = () => {
+    try {
+      playerRef.current?.pauseVideo?.();
+    } catch {}
+  };
+
+  const handleToggleWakeLock = async () => {
+    const acquired = await setScreenWakeLock(!wakeLockOn);
+    setWakeLockOn(acquired);
+  };
+
+  const handleToggleBgPlay = async () => {
+    pauseYoutubeIfPlaying();
+    if (bgState.mode === 'off') {
+      const idx = Math.max(
+        0,
+        displayedSegments.findIndex((s) => s.id === activeSegmentId)
+      );
+      await backgroundAudioService.startPodcast(displayedSegments, idx, {
+        title: video?.title || 'FluencyCast',
+        channel: video?.channel,
+      });
+      return;
+    }
+    if (bgState.isPlaying) {
+      backgroundAudioService.pause();
+    } else {
+      await backgroundAudioService.resume();
+    }
+  };
+
+  const handleSelectLocalAudioFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    pauseYoutubeIfPlaying();
+    setBgTab('local');
+    setBgPanelOpen(true);
+    await backgroundAudioService.loadLocalAudio(file, {
+      title: video?.title || file.name,
+      channel: video?.channel || 'Áudio Local',
+      startTime: currentTime > 0 ? currentTime : 0,
+    });
+    e.target.value = '';
   };
 
   // Play ONLY this specific segment and pause when it ends
@@ -1105,7 +1221,31 @@ export const VideoStudy: React.FC = () => {
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+            {/* Botao Segundo Plano (Celular) */}
+            <button
+              onClick={() => setBgPanelOpen((prev) => !prev)}
+              className={`btn btn-secondary ${bgState.isPlaying ? 'bg-audio-btn-active' : bgPanelOpen ? 'theater-active' : ''}`}
+              style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem' }}
+              title="Reproduzir lição ou MP3 local em segundo plano (tela bloqueada no celular)"
+            >
+              <Headphones size={14} />
+              <span>{bgState.isPlaying ? '2º Plano ON' : '2º Plano'}</span>
+            </button>
+
+            {/* Botao Manter Tela Acesa (Wake Lock) */}
+            {wakeLockAvailable && (
+              <button
+                onClick={handleToggleWakeLock}
+                className={`btn btn-secondary ${wakeLockOn ? 'wake-lock-active' : ''}`}
+                style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem' }}
+                title="Impedir que a tela do celular apague enquanto você estuda"
+              >
+                <Sun size={14} />
+                <span>{wakeLockOn ? 'Tela Acesa ON' : 'Tela Acesa'}</span>
+              </button>
+            )}
+
             {/* Botao Modo Teatro */}
             <button
               onClick={() => setTheaterMode(!theaterMode)}
@@ -1315,6 +1455,244 @@ export const VideoStudy: React.FC = () => {
           <span className="hint-chip"><kbd>D</kbd> ou <kbd>→</kbd> Próxima</span>
           <span className="hint-chip"><kbd>R</kbd> Áudio Nativo</span>
         </div>
+
+        {/* Mobile Background Audio Panel (Podcast + Local MP3) */}
+        {(bgPanelOpen || bgState.mode !== 'off') && (
+          <div className="bg-audio-panel">
+            <div className="bg-audio-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <Headphones size={16} color="var(--accent-cyan)" />
+                <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Áudio em Segundo Plano (Celular)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {bgState.mode !== 'off' && (
+                  <button
+                    onClick={() => backgroundAudioService.stop()}
+                    className="control-btn"
+                    style={{ padding: '0.25rem 0.55rem', fontSize: '0.74rem', color: 'var(--accent-rose)' }}
+                    title="Parar reprodução em segundo plano"
+                  >
+                    <Square size={11} />
+                    <span style={{ marginLeft: '4px' }}>Parar</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setBgPanelOpen(false)}
+                  className="control-btn"
+                  style={{ padding: '0.25rem 0.45rem' }}
+                  title="Minimizar painel"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-audio-tabs">
+              <button
+                type="button"
+                className={`bg-audio-tab ${bgTab === 'podcast' ? 'active' : ''}`}
+                onClick={() => setBgTab('podcast')}
+              >
+                <Headphones size={13} />
+                <span>Podcast da Lição (Tela Bloqueada)</span>
+              </button>
+              <button
+                type="button"
+                className={`bg-audio-tab ${bgTab === 'local' ? 'active' : ''}`}
+                onClick={() => setBgTab('local')}
+              >
+                <Music size={13} />
+                <span>MP3 / M4A do Celular</span>
+              </button>
+            </div>
+
+            {bgTab === 'podcast' ? (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  {(
+                    [
+                      { id: 'continuous', label: 'Contínuo (EN)' },
+                      { id: 'shadowing', label: 'Shadowing (Pausa 3.5s)' },
+                      { id: 'bilingual', label: 'Bilíngue (EN → PT)' },
+                    ] as Array<{ id: PodcastSubMode; label: string }>
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => backgroundAudioService.setPodcastConfig({ subMode: item.id })}
+                      className={`tool-pill ${bgState.subMode === item.id ? 'active' : ''}`}
+                    >
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div className="controls-group">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pauseYoutubeIfPlaying();
+                        const prevIdx = Math.max(0, bgState.podcastIndex - 1);
+                        if (bgState.mode === 'podcast') backgroundAudioService.jumpToPodcastSegment(prevIdx);
+                        else backgroundAudioService.startPodcast(displayedSegments, prevIdx, { title: video.title, channel: video.channel });
+                      }}
+                      className="control-btn"
+                      title="Frase anterior"
+                    >
+                      <SkipBack size={14} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleBgPlay}
+                      className={`control-btn ${bgState.isPlaying && bgState.mode === 'podcast' ? 'active' : ''}`}
+                      style={{ minWidth: '105px' }}
+                    >
+                      {bgState.isLoading ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : bgState.isPlaying && bgState.mode === 'podcast' ? (
+                        <Pause size={14} />
+                      ) : (
+                        <Play size={14} />
+                      )}
+                      <span style={{ marginLeft: '5px' }}>
+                        {bgState.isPlaying && bgState.mode === 'podcast' ? 'Pausar' : 'Ouvir Agora'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pauseYoutubeIfPlaying();
+                        const nextIdx = Math.min(displayedSegments.length - 1, bgState.podcastIndex + 1);
+                        if (bgState.mode === 'podcast') backgroundAudioService.jumpToPodcastSegment(nextIdx);
+                        else backgroundAudioService.startPodcast(displayedSegments, nextIdx, { title: video.title, channel: video.channel });
+                      }}
+                      className="control-btn"
+                      title="Próxima frase"
+                    >
+                      <SkipForward size={14} />
+                    </button>
+                  </div>
+
+                  <div className="controls-group">
+                    {(['male', 'female'] as PodcastVoice[]).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => backgroundAudioService.setPodcastConfig({ voice: v })}
+                        className={`control-btn ${bgState.voice === v ? 'active' : ''}`}
+                        style={{ padding: '0.35rem 0.5rem', fontSize: '0.73rem' }}
+                      >
+                        {v === 'male' ? 'Masc' : 'Fem'}
+                      </button>
+                    ))}
+                    {[0.85, 1.0, 1.15].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => backgroundAudioService.setPodcastConfig({ playbackRate: r })}
+                        className={`control-btn ${bgState.playbackRate === r ? 'active' : ''}`}
+                        style={{ padding: '0.35rem 0.45rem', fontSize: '0.73rem' }}
+                      >
+                        {r}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-audio-status-box">
+                  <div style={{ fontSize: '0.76rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>
+                    {bgState.mode === 'podcast'
+                      ? bgState.phaseLabel
+                      : 'Toca todas as frases da lição em voz neural e continua tocando com a tela bloqueada.'}
+                  </div>
+                  {bgState.mode === 'podcast' && bgState.currentText && (
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+                      "{bgState.currentText}"
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <input
+                  ref={localAudioInputRef}
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleSelectLocalAudioFile}
+                  style={{ display: 'none' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => localAudioInputRef.current?.click()}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
+                  >
+                    <Upload size={14} />
+                    <span>{bgState.localFileName ? 'Trocar Arquivo MP3/M4A' : 'Selecionar MP3 / M4A do celular'}</span>
+                  </button>
+                  {bgState.mode === 'local' && bgState.localFileName && (
+                    <span style={{ fontSize: '0.76rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>
+                      {bgState.localFileName}
+                    </span>
+                  )}
+                </div>
+
+                {bgState.mode === 'local' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div className="controls-group">
+                        <button type="button" onClick={() => backgroundAudioService.seekLocalDelta(-5)} className="control-btn">
+                          <RotateCcw size={13} />
+                          <span style={{ marginLeft: '3px' }}>-5s</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => (bgState.isPlaying ? backgroundAudioService.pause() : backgroundAudioService.resume())}
+                          className={`control-btn ${bgState.isPlaying ? 'active' : ''}`}
+                        >
+                          {bgState.isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                          <span style={{ marginLeft: '4px' }}>{bgState.isPlaying ? 'Pausar' : 'Tocar'}</span>
+                        </button>
+                        <button type="button" onClick={() => backgroundAudioService.seekLocalDelta(5)} className="control-btn">
+                          <span style={{ marginRight: '3px' }}>+5s</span>
+                          <RotateCw size={13} />
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                        {formatTimestamp(bgState.localCurrentTime)} / {formatTimestamp(bgState.localDuration || 0)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(1, bgState.localDuration)}
+                      step={0.5}
+                      value={bgState.localCurrentTime}
+                      onChange={(e) => backgroundAudioService.seekLocalTo(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-audio-status-box">
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      Ideal para músicas: escolha um `.mp3` ou `.m4a` salvo no celular para acompanhar a letra sincronizada mesmo com a tela apagada.
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {bgState.error && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--accent-rose)' }}>
+                {bgState.error}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Video Info Summary */}
         <div style={{ padding: '0.25rem 0.5rem' }}>

@@ -194,4 +194,164 @@ def test_create_video_stream_progress(client, monkeypatch):
     assert final_event["video"]["title"] == "Mr. English Stream Test"
 
 
+def test_extract_keywords_full_video_coverage_and_idioms(db_session):
+    from app.models.user import User
+    from app.models.video import Video
+    from app.models.transcript import TranscriptSegment
+    from app.services.vocabulary import extract_keywords_for_video
+
+    user = User(email="fullcover@fluencycast.com", hashed_password="pw", full_name="Coverage Tester")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    video = Video(
+        user_id=user.id,
+        youtube_id="fullcover1",
+        url="https://youtube.com/watch?v=fullcover1",
+        title="Full Coverage Podcast",
+        duration=960.0,
+    )
+    db_session.add(video)
+    db_session.commit()
+    db_session.refresh(video)
+
+    segments_data = [
+        (1, 8.0, 14.0, "Hello everyone and welcome back to Mr. English Channel. I'm Emily."),
+        (2, 15.0, 22.0, "Hi Emily, I'm Paul and today's conversation is easy and fun."),
+        (3, 60.0, 75.0, "Sometimes you feel overwhelmed and hesitate to share your honest opinion."),
+        (4, 150.0, 165.0, "Don't put off your goals when small mistakes seem discouraging."),
+        (5, 240.0, 260.0, "We slowly figured out why people compare their progress unfairly."),
+        (6, 360.0, 380.0, "Everything fell apart briefly, yet patience and courage brought clarity."),
+        (7, 480.0, 500.0, "That advice actually makes sense when you gain perspective over time."),
+        (8, 600.0, 620.0, "Negative anxiety almost took over, so consistent routine gave relief."),
+        (9, 720.0, 745.0, "Staying grateful and humble builds real confidence and inner strength."),
+        (10, 840.0, 865.0, "Even embarrassed learners eventually celebrate meaningful growth and freedom."),
+        (11, 900.0, 950.0, "Moving on from perfectionism requires kindness, curiosity, and resilience."),
+    ]
+    for seq, start, end, text in segments_data:
+        db_session.add(TranscriptSegment(video_id=video.id, sequence=seq, start_time=start, end_time=end, text=text))
+    db_session.commit()
+
+    phrases = extract_keywords_for_video(video.id, user.id, db_session, max_keywords=30)
+    by_text = {p.text.lower(): p for p in phrases}
+
+    # 1. Intro boilerplate and speaker names are filtered out
+    for banned in ("emily", "paul", "channel", "english", "everyone"):
+        assert banned not in by_text
+
+    # 2. Inflected phrasal verbs/chunks are matched AND translated idiomatically (not single-verb)
+    assert "put off" in by_text
+    assert "adiar" in by_text["put off"].translation.lower()
+
+    assert "figure out" in by_text
+    assert "descobrir" in by_text["figure out"].translation.lower()
+
+    assert "fall apart" in by_text
+    assert "desmoronar" in by_text["fall apart"].translation.lower()
+
+    assert "make sense" in by_text
+    assert "sentido" in by_text["make sense"].translation.lower()
+
+    assert "take over" in by_text
+    assert "assumir" in by_text["take over"].translation.lower()
+
+    # 3. Words cover later portions of the video rather than clustering under 40s
+    word_timestamps = [p.timestamp for p in phrases if p.phrase_type == "WORD" and p.timestamp is not None]
+    assert word_timestamps
+    assert max(word_timestamps) >= 480.0
+
+
+def test_extract_keywords_refresh_preserves_sentences_and_reviewed(db_session):
+    from app.models.user import User
+    from app.models.video import Video
+    from app.models.transcript import TranscriptSegment
+    from app.models.phrase import SavedPhrase
+    from app.services.vocabulary import extract_keywords_for_video
+
+    user = User(email="refreshcover@fluencycast.com", hashed_password="pw", full_name="Refresh Tester")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    video = Video(
+        user_id=user.id,
+        youtube_id="refreshvid1",
+        url="https://youtube.com/watch?v=refreshvid1",
+        title="Refresh Video",
+        duration=300.0,
+    )
+    db_session.add(video)
+    db_session.commit()
+    db_session.refresh(video)
+
+    seg = TranscriptSegment(
+        video_id=video.id,
+        sequence=1,
+        start_time=20.0,
+        end_time=40.0,
+        text="Consistent patience helps build confidence and overcome sudden fear.",
+    )
+    db_session.add(seg)
+    db_session.commit()
+
+    # Pre-existing cards: 1 unreviewed NEW WORD, 1 reviewed WORD, 1 saved SENTENCE
+    old_new_word = SavedPhrase(
+        user_id=user.id,
+        video_id=video.id,
+        transcript_segment_id=seg.id,
+        text="emily",
+        translation="Significado em contexto",
+        phrase_type="WORD",
+        status="NEW",
+        repetitions=0,
+    )
+    studied_word = SavedPhrase(
+        user_id=user.id,
+        video_id=video.id,
+        transcript_segment_id=seg.id,
+        text="confidence",
+        translation="confiança",
+        phrase_type="WORD",
+        status="LEARNING",
+        repetitions=2,
+    )
+    saved_sentence = SavedPhrase(
+        user_id=user.id,
+        video_id=video.id,
+        transcript_segment_id=seg.id,
+        text="Consistent patience helps build confidence.",
+        translation="Paciência consistente ajuda a construir confiança.",
+        phrase_type="SENTENCE",
+        status="NEW",
+        repetitions=0,
+    )
+    db_session.add_all([old_new_word, studied_word, saved_sentence])
+    db_session.commit()
+
+    extract_keywords_for_video(video.id, user.id, db_session, refresh=True)
+
+    remaining = db_session.query(SavedPhrase).filter(SavedPhrase.video_id == video.id).all()
+    remaining_texts = [p.text for p in remaining]
+    assert "emily" not in remaining_texts
+    assert "confidence" in remaining_texts
+    assert "Consistent patience helps build confidence." in remaining_texts
+
+
+def test_translate_no_literal_single_verb_for_phrases(monkeypatch):
+    import requests as req_lib
+    from app.api.v1.endpoints.ai import translate_text, TranslateRequest
+
+    # Force network calls to fail so only local dictionaries/fallbacks run
+    monkeypatch.setattr(req_lib, "get", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    # Known idiomatic expressions resolve cleanly
+    assert "sentido" in translate_text(TranslateRequest(text="make sense"), current_user=None).translation.lower()
+    assert "aparecer" in translate_text(TranslateRequest(text="show up"), current_user=None).translation.lower()
+
+    # Unknown multi-word phrase must NOT return a broken single-verb literal translation like "fazer"
+    unknown = translate_text(TranslateRequest(text="make xylophoneblorp"), current_user=None).translation
+    assert unknown == "make xylophoneblorp"
+
+
 

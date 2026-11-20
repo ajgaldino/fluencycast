@@ -44,6 +44,8 @@ export const Videos: React.FC = () => {
   const [summaryCounts, setSummaryCounts] = useState<{ segments?: number; keywords?: number }>({});
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [receivedServerEvent, setReceivedServerEvent] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const abortReasonRef = useRef<'user' | 'timeout' | null>(null);
@@ -233,24 +235,78 @@ export const Videos: React.FC = () => {
     }
   };
 
+  const handleReoptimizeAllKeywords = async () => {
+    try {
+      setSyncingAll(true);
+      setSyncFeedback(null);
+      const res = await videoService.syncAllKeywords(true);
+      setSyncFeedback(res.message || `${res.total_cards_created} flashcards reotimizados com sucesso!`);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao reotimizar flashcards.');
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   return (
     <div>
-      <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
+      <div className="flex-between" style={{ marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 style={{ fontSize: '1.6rem' }}>Biblioteca de Mídia</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
             Vídeos e músicas sincronizados para estudo
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn btn-primary"
-          style={{ padding: '0.6rem 1rem' }}
-        >
-          <Plus size={18} />
-          <span>Adicionar</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          {videos.length > 0 && (
+            <button
+              onClick={handleReoptimizeAllKeywords}
+              disabled={syncingAll}
+              className="btn btn-secondary"
+              style={{ padding: '0.6rem 0.9rem', fontSize: '0.86rem' }}
+              title="Reextrair expressões, phrasal verbs e vocabulário cobrindo 100% dos seus vídeos já salvos"
+            >
+              {syncingAll ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} color="var(--accent-cyan)" />}
+              <span>{syncingAll ? 'Reotimizando...' : 'Reotimizar Flashcards'}</span>
+            </button>
+          )}
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn btn-primary"
+            style={{ padding: '0.6rem 1rem' }}
+          >
+            <Plus size={18} />
+            <span>Adicionar</span>
+          </button>
+        </div>
       </div>
+
+      {syncFeedback && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            padding: '0.75rem 1rem',
+            marginBottom: '1.25rem',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            color: 'var(--accent-emerald)',
+            fontSize: '0.88rem',
+            fontWeight: 600,
+          }}
+        >
+          <span>✨ {syncFeedback}</span>
+          <button
+            onClick={() => setSyncFeedback(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '0.82rem' }}
+          >
+            Fechar
+          </button>
+        </div>
+      )}
 
       {/* Modal / Card para Adicionar Vídeo */}
       {showAddModal && (

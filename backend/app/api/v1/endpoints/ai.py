@@ -1,7 +1,7 @@
 import io
 import re
 import urllib.parse
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import requests
 import edge_tts
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +9,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from app.api.deps import get_current_user
 from app.models.user import User
+from app.services.dictionary_data import (
+    CORE_DICTIONARY,
+    PHRASAL_VERBS_AND_CHUNKS,
+    lookup_local_translation,
+)
 
 router = APIRouter()
 
@@ -22,6 +27,8 @@ VOICE_MAP = {
     "ava": "en-US-AvaNeural",
     "british_male": "en-GB-RyanNeural",
     "british_female": "en-GB-SoniaNeural",
+    "pt_female": "pt-BR-FranciscaNeural",
+    "pt_male": "pt-BR-AntonioNeural",
 }
 
 # In-memory translation cache to guarantee instant responses and avoid rate limits
@@ -58,227 +65,14 @@ class ExampleResponse(BaseModel):
     translation: str = ""
 
 
-CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
-    "let": {"translation": "deixar, permitir", "pos": "verbo", "tip": "Usado para dar permissão ou sugerir. 'Let me help you' = Deixa eu te ajudar."},
-    "about": {"translation": "sobre, a respeito de, quase", "pos": "preposição / advérbio", "tip": "Indica assunto ou aproximação. 'What's it about?' = Sobre o que é? / 'About 10 minutes' = Uns 10 minutos."},
-    "something": {"translation": "algo, alguma coisa", "pos": "pronome", "tip": "Refere-se a uma coisa indefinida. 'Tell me something' = Me conta alguma coisa."},
-    "everything": {"translation": "tudo, todas as coisas", "pos": "pronome", "tip": "Engloba a totalidade. 'Everything is fine' = Está tudo bem."},
-    "nothing": {"translation": "nada", "pos": "pronome", "tip": "Negação total. 'Nothing happened' = Nada aconteceu. Não precisa de 'not'."},
-    "anything": {"translation": "qualquer coisa, nada", "pos": "pronome", "tip": "Usado em perguntas e negações. 'Is there anything else?' = Tem mais alguma coisa?"},
-    "think": {"translation": "pensar, achar, acreditar", "pos": "verbo", "tip": "Expressa opinião: 'I think so' = Acho que sim. Muito comum no dia a dia."},
-    "look": {"translation": "olhar, parecer, buscar", "pos": "verbo", "tip": "'Look at this' = Olha isso. 'You look great' = Você parece ótimo(a). Phrasal verbs: look for, look up."},
-    "get": {"translation": "obter, conseguir, ficar, entender", "pos": "verbo", "tip": "Verbo coringa do inglês! 'Get it?' = Entendeu? 'Get home' = Chegar em casa. 'Get angry' = Ficar bravo."},
-    "take": {"translation": "levar, tomar, pegar", "pos": "verbo", "tip": "'Take your time' = Leve o tempo que precisar. 'Take a break' = Fazer uma pausa."},
-    "see": {"translation": "ver, enxergar, entender", "pos": "verbo", "tip": "'I see' = Entendo. 'See you later' = Até mais. Diferente de 'look' (olhar com atenção)."},
-    "know": {"translation": "saber, conhecer", "pos": "verbo", "tip": "'You know what I mean' = Sabe o que eu quero dizer. 'I don't know' = Não sei."},
-    "make": {"translation": "fazer, criar, tornar", "pos": "verbo", "tip": "'Make a decision' = Tomar uma decisão. Diferente de 'do': make = criar algo, do = executar."},
-    "say": {"translation": "dizer, falar", "pos": "verbo", "tip": "Fala-se 'say something' (dizer algo). Diferente de 'tell' que pede complemento: 'tell someone'."},
-    "tell": {"translation": "contar, dizer a alguém", "pos": "verbo", "tip": "Sempre usado com pessoa: 'Tell me' = Me conta. 'Tell him the truth' = Conta a verdade pra ele."},
-    "feel": {"translation": "sentir, achar", "pos": "verbo", "tip": "'I feel like...' = Estou com vontade de... / 'How do you feel?' = Como você se sente?"},
-    "want": {"translation": "querer, desejar", "pos": "verbo", "tip": "'I want to...' = Eu quero... Direto e natural: 'Do you want some coffee?' = Quer um café?"},
-    "need": {"translation": "precisar, necessitar", "pos": "verbo", "tip": "'I need help' = Preciso de ajuda. Mais urgente que 'want'. 'You need to rest' = Precisa descansar."},
-    "mean": {"translation": "significar, pretender", "pos": "verbo", "tip": "'What do you mean?' = O que você quer dizer? 'I didn't mean to' = Não foi minha intenção."},
-    "keep": {"translation": "manter, continuar", "pos": "verbo", "tip": "'Keep going' = Continue. 'Keep in mind' = Tenha em mente. 'Keep it simple' = Mantenha simples."},
-    "help": {"translation": "ajudar, ajuda", "pos": "verbo", "tip": "'Can you help me?' = Pode me ajudar? 'I can't help it' = Não consigo evitar."},
-    "talk": {"translation": "conversar, falar", "pos": "verbo", "tip": "'Talk to me' = Fala comigo. 'We need to talk' = Precisamos conversar. Mais informal que 'speak'."},
-    "listen": {"translation": "ouvir, escutar", "pos": "verbo", "tip": "'Listen to me' = Me escuta. Diferente de 'hear' (ouvir sem esforço). Listen = ouvir com atenção."},
-    "handle": {"translation": "lidar com, aguentar, manusear", "pos": "verbo", "tip": "'I can handle it' = Eu dou conta. Muito usado para situações difíceis."},
-    "deal": {"translation": "lidar, tratar, acordo", "pos": "verbo", "tip": "'Deal with it' = Lide com isso. 'Big deal!' = Grande coisa! (irônico). 'It's a deal' = Fechado!"},
-    "face": {"translation": "encarar, enfrentar, rosto", "pos": "verbo / substantivo", "tip": "'Face the problem' = Enfrente o problema. 'Face to face' = Cara a cara."},
-    "run": {"translation": "correr, fugir, executar", "pos": "verbo", "tip": "'Run a business' = Administrar um negócio. 'Run out of' = Ficar sem. Muito versátil."},
-    "walk": {"translation": "andar, caminhar", "pos": "verbo", "tip": "'Walk away' = Ir embora. 'Take a walk' = Dar uma caminhada."},
-    "live": {"translation": "viver, morar", "pos": "verbo", "tip": "'Where do you live?' = Onde você mora? 'Live and learn' = Vivendo e aprendendo."},
-    "stay": {"translation": "ficar, permanecer", "pos": "verbo", "tip": "'Stay here' = Fique aqui. 'Stay calm' = Fique calmo. 'Stay in touch' = Mantenha contato."},
-    "leave": {"translation": "deixar, partir, sair", "pos": "verbo", "tip": "'Leave me alone' = Me deixa em paz. 'I have to leave' = Tenho que ir."},
-    "stop": {"translation": "parar, interromper", "pos": "verbo", "tip": "'Stop it!' = Para com isso! 'Stop + -ing' = Parar de fazer: 'Stop talking' = Pare de falar."},
-    "start": {"translation": "começar, iniciar", "pos": "verbo", "tip": "'Let's start' = Vamos começar. 'Start over' = Recomeçar do zero."},
-    "try": {"translation": "tentar, experimentar", "pos": "verbo", "tip": "'Try again' = Tente de novo. 'Try + to + verbo' = Tentar fazer. 'Give it a try' = Dá uma chance."},
-    "ask": {"translation": "perguntar, pedir", "pos": "verbo", "tip": "'Ask a question' = Fazer uma pergunta. 'Ask for help' = Pedir ajuda."},
-    "answer": {"translation": "responder, resposta", "pos": "verbo / substantivo", "tip": "'Answer the phone' = Atender o telefone. 'The answer is...' = A resposta é..."},
-    "question": {"translation": "pergunta, questionamento", "pos": "substantivo", "tip": "'Good question!' = Boa pergunta! 'No questions asked' = Sem perguntas."},
-    "problem": {"translation": "problema, dificuldade", "pos": "substantivo", "tip": "'No problem!' = Sem problemas! Usado como 'de nada' em resposta a agradecimentos."},
-    "time": {"translation": "tempo, hora, vez", "pos": "substantivo", "tip": "'What time is it?' = Que horas são? 'One more time' = Mais uma vez. 'It's time to go' = É hora de ir."},
-    "life": {"translation": "vida", "pos": "substantivo", "tip": "'That's life' = É a vida. 'Real life' = Vida real. Plural: 'lives'."},
-    "people": {"translation": "pessoas, gente", "pos": "substantivo", "tip": "Já é plural! 'People are...' (não 'peoples'). 'A lot of people' = Muita gente."},
-    "friend": {"translation": "amigo, amiga", "pos": "substantivo", "tip": "'Best friend' = Melhor amigo(a). 'Make friends' = Fazer amizades."},
-    "coworker": {"translation": "colega de trabalho", "pos": "substantivo", "tip": "Também escrito 'co-worker'. Sinônimo: 'colleague' (mais formal)."},
-    "neighbor": {"translation": "vizinho, vizinha", "pos": "substantivo", "tip": "'Next-door neighbor' = Vizinho de porta. Grafia britânica: 'neighbour'."},
-    "neighborhood": {"translation": "bairro, vizinhança", "pos": "substantivo", "tip": "'Nice neighborhood' = Bairro legal. Comum em conversas sobre onde morar."},
-    "family": {"translation": "família", "pos": "substantivo", "tip": "'Family comes first' = Família vem primeiro. Pode ser usado com verbo singular ou plural."},
-    "school": {"translation": "escola, colégio", "pos": "substantivo", "tip": "Nos EUA, 'school' inclui faculdade! 'I'm in school' pode significar 'estou na universidade'."},
-    "work": {"translation": "trabalhar, trabalho", "pos": "verbo / substantivo", "tip": "'It works!' = Funciona! 'Work out' = Malhar / resolver. 'Get to work' = Mãos à obra."},
-    "day": {"translation": "dia", "pos": "substantivo", "tip": "'Day off' = Dia de folga. 'The other day' = Outro dia (recentemente). 'Day by day' = Dia a dia."},
-    "way": {"translation": "maneira, jeito, caminho", "pos": "substantivo", "tip": "'By the way' = A propósito. 'No way!' = De jeito nenhum! 'This way' = Por aqui."},
-    "thing": {"translation": "coisa, situação", "pos": "substantivo", "tip": "'The thing is...' = O negócio é que... 'First things first' = Primeiro o mais importante."},
-    "someone": {"translation": "alguém", "pos": "pronome", "tip": "'Someone told me' = Alguém me contou. Usado em frases afirmativas (vs 'anyone' em perguntas)."},
-    "everyone": {"translation": "todos, todo mundo", "pos": "pronome", "tip": "'Everyone knows' = Todo mundo sabe. Verbo sempre no singular! 'Everyone is ready'."},
-    "anyone": {"translation": "qualquer pessoa, ninguém", "pos": "pronome", "tip": "'Does anyone know?' = Alguém sabe? Usado em perguntas e negações."},
-    "give": {"translation": "dar, entregar", "pos": "verbo", "tip": "'Give me a break' = Me dá um tempo. 'Give up' = Desistir. 'Give it a try' = Tenta."},
-    "find": {"translation": "encontrar, achar", "pos": "verbo", "tip": "'Find out' = Descobrir. 'I find it interesting' = Acho interessante (opinião)."},
-    "show": {"translation": "mostrar, apresentar", "pos": "verbo", "tip": "'Show me' = Me mostra. 'Show up' = Aparecer. 'A TV show' = Um programa de TV."},
-    "hear": {"translation": "ouvir, escutar", "pos": "verbo", "tip": "'I hear you' = Te entendo / te escuto. Diferente de 'listen': hear é involuntário."},
-    "write": {"translation": "escrever", "pos": "verbo", "tip": "'Write down' = Anotar. Passado irregular: wrote. Particípio: written."},
-    "read": {"translation": "ler", "pos": "verbo", "tip": "Pronúncia muda! Presente: /riid/. Passado: /red/. 'Read between the lines' = Ler nas entrelinhas."},
-    "speak": {"translation": "falar, conversar", "pos": "verbo", "tip": "'Speak up' = Fale mais alto. Mais formal que 'talk'. 'Do you speak English?' = Você fala inglês?"},
-    "difficult": {"translation": "difícil, complicado", "pos": "adjetivo", "tip": "Sinônimo formal de 'hard'. 'A difficult situation' = Uma situação difícil."},
-    "easy": {"translation": "fácil, simples", "pos": "adjetivo", "tip": "'Take it easy' = Vai com calma. 'Easy peasy' = Moleza (informal). Oposto de 'hard'."},
-    "hard": {"translation": "difícil, duro, pesado", "pos": "adjetivo", "tip": "'Hard work' = Trabalho duro. 'It's hard to...' = É difícil... Também advérbio: 'Work hard'."},
-    "rude": {"translation": "rude, grosseiro, mal-educado", "pos": "adjetivo", "tip": "'That's rude!' = Que grosseria! 'Don't be rude' = Não seja mal-educado."},
-    "wonderful": {"translation": "maravilhoso, incrível", "pos": "adjetivo", "tip": "'What a wonderful day!' = Que dia maravilhoso! Mais entusiasmado que 'good' ou 'nice'."},
-    "great": {"translation": "ótimo, excelente, grande", "pos": "adjetivo", "tip": "'That's great!' = Que ótimo! Um dos elogios mais usados no inglês cotidiano."},
-    "important": {"translation": "importante, relevante", "pos": "adjetivo", "tip": "'It's important to...' = É importante... 'The most important thing' = O mais importante."},
-    "carefully": {"translation": "cuidadosamente, com cuidado", "pos": "advérbio", "tip": "'Listen carefully' = Escute com atenção. 'Think carefully' = Pense bem antes de agir."},
-    "seriously": {"translation": "seriamente, falando sério", "pos": "advérbio", "tip": "'Seriously?' = Sério? 'Take it seriously' = Leve a sério. Muito usado como reação."},
-    "always": {"translation": "sempre", "pos": "advérbio", "tip": "Posição: antes do verbo principal. 'I always wake up early' = Sempre acordo cedo."},
-    "never": {"translation": "nunca, jamais", "pos": "advérbio", "tip": "'Never mind' = Esquece / não importa. Já é negativo, não use com 'not'."},
-    "sometimes": {"translation": "às vezes, de vez em quando", "pos": "advérbio", "tip": "Pode vir no início ou meio da frase. 'Sometimes I wonder...' = Às vezes eu penso..."},
-    "really": {"translation": "realmente, muito, de verdade", "pos": "advérbio", "tip": "'Really?' = Sério? 'I really like it' = Eu gosto muito. Intensificador universal."},
-    "together": {"translation": "juntos, em conjunto", "pos": "advérbio", "tip": "'Let's do it together' = Vamos fazer juntos. 'Get together' = Se reunir."},
-    "away": {"translation": "longe, embora", "pos": "advérbio", "tip": "'Go away' = Vá embora. 'Far away' = Longe. 'Right away' = Imediatamente."},
-    "right": {"translation": "certo, correto, direito", "pos": "adjetivo", "tip": "'You're right' = Você tem razão. 'Right now' = Agora mesmo. 'All right' = Tudo bem."},
-    "wrong": {"translation": "errado, incorreto", "pos": "adjetivo", "tip": "'What's wrong?' = O que houve? / Qual o problema? 'You're wrong' = Você está errado."},
-    # Expanded conversational core words
-    "quick": {"translation": "rápido, veloz, ágil", "pos": "adjetivo", "tip": "'A quick question' = Uma pergunta rápida. 'Quick thinking' = Raciocínio rápido."},
-    "quickly": {"translation": "rapidamente, depressa", "pos": "advérbio", "tip": "'Come quickly!' = Venha depressa!"},
-    "small": {"translation": "pequeno, curto", "pos": "adjetivo", "tip": "'Small talk' = Conversa fiada / bate-papo informal. 'A small problem' = Um probleminha."},
-    "safe": {"translation": "seguro, protegido, tranquilo", "pos": "adjetivo", "tip": "'Safe topics' = Assuntos seguros. 'Stay safe' = Fique seguro / se cuide."},
-    "safely": {"translation": "com segurança", "pos": "advérbio", "tip": "'Drive safely' = Dirija com segurança."},
-    "safety": {"translation": "segurança, proteção", "pos": "substantivo", "tip": "'Safety first' = Segurança em primeiro lugar."},
-    "taboo": {"translation": "tabu, assunto proibido", "pos": "substantivo / adjetivo", "tip": "'Taboo topics' = Temas proibidos ou delicados em conversas."},
-    "stranger": {"translation": "estranho, desconhecido", "pos": "substantivo", "tip": "'Talking to strangers' = Conversando com desconhecidos."},
-    "strangers": {"translation": "estranhos, desconhecidos", "pos": "substantivo", "tip": "Plural de stranger."},
-    "silence": {"translation": "silêncio", "pos": "substantivo", "tip": "'Awkward silence' = Silêncio constrangedor. 'Fill the silence' = Preencher o silêncio."},
-    "awkward": {"translation": "estranho, constrangedor, desajeitado", "pos": "adjetivo", "tip": "'An awkward moment' = Um momento constrangedor."},
-    "bridge": {"translation": "ponte, ligação", "pos": "substantivo", "tip": "'Build a bridge' = Construir uma ponte / criar conexão com alguém."},
-    "traffic": {"translation": "trânsito, tráfego", "pos": "substantivo", "tip": "'Heavy traffic' = Trânsito pesado. Muito comum em small talk."},
-    "elevator": {"translation": "elevador", "pos": "substantivo", "tip": "'In the elevator' = No elevador. Cenário clássico de conversa casual."},
-    "nervous": {"translation": "nervoso, ansioso", "pos": "adjetivo", "tip": "'Feel nervous' = Sentir-se nervoso. Normal ao falar outro idioma!"},
-    "weather": {"translation": "clima, tempo", "pos": "substantivo", "tip": "'Nice weather today!' = Tempo bom hoje! O assunto número 1 de small talk."},
-    "chat": {"translation": "conversa, bater papo", "pos": "verbo / substantivo", "tip": "'Have a quick chat' = Ter uma conversa rápida."},
-    "store": {"translation": "loja, guardar", "pos": "substantivo / verbo", "tip": "'At the grocery store' = No supermercado."},
-    "grocery": {"translation": "mercearia, compras de comida", "pos": "substantivo", "tip": "'Grocery shopping' = Fazer compras de supermercado."},
-    "debate": {"translation": "debate, discussão", "pos": "substantivo / verbo", "tip": "'Deep debate' = Debate profundo."},
-    "friendly": {"translation": "amigável, simpático", "pos": "adjetivo", "tip": "'Friendly smile' = Sorriso simpático. 'Be friendly' = Seja amigável."},
-    "fill": {"translation": "preencher, encher", "pos": "verbo", "tip": "'Fill the silence' = Preencher o silêncio."},
-    "connect": {"translation": "conectar, ligar, aproximar", "pos": "verbo", "tip": "'Connect with people' = Se conectar com as pessoas."},
-    "honest": {"translation": "honesto, sincero", "pos": "adjetivo", "tip": "'To be honest' = Para ser sincero."},
-    "honestly": {"translation": "sinceramente, honestamente", "pos": "advérbio", "tip": "'Honestly, I don't know' = Sinceramente, eu não sei."},
-    "native": {"translation": "nativo, natural", "pos": "adjetivo / substantivo", "tip": "'Native speaker' = Falante nativo."},
-    "basically": {"translation": "basicamente", "pos": "advérbio", "tip": "'Basically, it works like this' = Basicamente, funciona assim."},
-    "casual": {"translation": "casual, informal, descontraído", "pos": "adjetivo", "tip": "'Casual conversation' = Conversa informal."},
-    "light": {"translation": "leve, luz, claro", "pos": "adjetivo / substantivo", "tip": "'Light topics' = Assuntos leves."},
-    "deep": {"translation": "profundo, intenso", "pos": "adjetivo", "tip": "'Deep conversation' = Conversa profunda."},
-    "philosophical": {"translation": "filosófico", "pos": "adjetivo", "tip": "'Philosophical debate' = Debate filosófico."},
-    "huge": {"translation": "enorme, gigantesco", "pos": "adjetivo", "tip": "'A huge difference' = Uma enorme diferença."},
-    "vocabulary": {"translation": "vocabulário", "pos": "substantivo", "tip": "'Expand vocabulary' = Expandir o vocabulário."},
-    "practice": {"translation": "praticar, treino, prática", "pos": "verbo / substantivo", "tip": "'Practice makes perfect' = A prática leva à perfeição."},
-    "speaking": {"translation": "fala, conversação", "pos": "substantivo", "tip": "'Speaking skills' = Habilidades de fala."},
-    "perfect": {"translation": "perfeito, ideal", "pos": "adjetivo", "tip": "'Perfect place' = Lugar perfeito."},
-    "place": {"translation": "lugar, colocar", "pos": "substantivo / verbo", "tip": "'In the first place' = Em primeiro lugar."},
-    "short": {"translation": "curto, breve, baixo", "pos": "adjetivo", "tip": "'Short conversations' = Conversas curtas."},
-    "topic": {"translation": "assunto, tópico, tema", "pos": "substantivo", "tip": "'Today's topic' = O tema de hoje."},
-    "topics": {"translation": "assuntos, tópicos, temas", "pos": "substantivo", "tip": "Plural de topic."},
-    "conversation": {"translation": "conversa, diálogo", "pos": "substantivo", "tip": "'Start a conversation' = Iniciar uma conversa."},
-    "conversations": {"translation": "conversas, diálogos", "pos": "substantivo", "tip": "Plural de conversation."},
-    "channel": {"translation": "canal", "pos": "substantivo", "tip": "'YouTube channel' = Canal no YouTube."},
-    "simple": {"translation": "simples, descomplicado", "pos": "adjetivo", "tip": "'Keep it simple' = Mantenha simples."},
-    "funny": {"translation": "engraçado, divertido", "pos": "adjetivo", "tip": "'That's so funny!' = Isso é muito engraçado!"},
-    "laugh": {"translation": "rir, risada", "pos": "verbo / substantivo", "tip": "'Make me laugh' = Me fazer rir."},
-    "smile": {"translation": "sorrir, sorriso", "pos": "verbo / substantivo", "tip": "'Keep smiling' = Continue sorrindo."},
-    "happy": {"translation": "feliz, contente", "pos": "adjetivo", "tip": "'Happy to help' = Feliz em ajudar."},
-    "tired": {"translation": "cansado, farto", "pos": "adjetivo", "tip": "'I'm so tired' = Estou tão cansado(a)."},
-    "busy": {"translation": "ocupado, agitado", "pos": "adjetivo", "tip": "'Busy day' = Dia corrido/ocupado."},
-    "ready": {"translation": "pronto, preparado", "pos": "adjetivo", "tip": "'Are you ready?' = Você está pronto?"},
-    "smart": {"translation": "inteligente, esperto", "pos": "adjetivo", "tip": "'Smart choice' = Escolha inteligente."},
-    "polite": {"translation": "educado, cortês", "pos": "adjetivo", "tip": "'Be polite' = Seja educado."},
-    "advice": {"translation": "conselho, orientação", "pos": "substantivo", "tip": "'Good advice' = Bom conselho."},
-    "secret": {"translation": "segredo, secreto", "pos": "substantivo / adjetivo", "tip": "'Keep a secret' = Guardar segredo."},
-    "politics": {"translation": "política", "pos": "substantivo", "tip": "'Avoid politics in small talk' = Evite política em conversas casuais."},
-    "religion": {"translation": "religião", "pos": "substantivo", "tip": "'Sensitive topic' = Tema sensível."},
-    "money": {"translation": "dinheiro", "pos": "substantivo", "tip": "'Save money' = Economizar dinheiro."},
-    "salary": {"translation": "salário", "pos": "substantivo", "tip": "'Monthly salary' = Salário mensal."},
-    "job": {"translation": "trabalho, emprego", "pos": "substantivo", "tip": "'Good job!' = Bom trabalho!"},
-    "boss": {"translation": "chefe, patrão", "pos": "substantivo", "tip": "'Talk to the boss' = Falar com o chefe."},
-    "vacation": {"translation": "férias", "pos": "substantivo", "tip": "'On vacation' = De férias. Ótimo assunto de conversa!"},
-    "holiday": {"translation": "feriado, folga", "pos": "substantivo", "tip": "'Public holiday' = Feriado público."},
-    "weekend": {"translation": "fim de semana", "pos": "substantivo", "tip": "'Have a great weekend!' = Tenha um ótimo fim de semana!"},
-    "morning": {"translation": "manhã", "pos": "substantivo", "tip": "'Good morning!' = Bom dia!"},
-    "afternoon": {"translation": "tarde", "pos": "substantivo", "tip": "'Good afternoon!' = Boa tarde!"},
-    "night": {"translation": "noite", "pos": "substantivo", "tip": "'Good night!' = Boa noite!"},
-    "fast": {"translation": "rápido, veloz", "pos": "adjetivo / advérbio", "tip": "'Fast food' / 'Hold on fast'."},
-    "slow": {"translation": "lento, devagar", "pos": "adjetivo / advérbio", "tip": "'Slow down' = Diminua o ritmo."},
-    "loud": {"translation": "alto, barulhento", "pos": "adjetivo", "tip": "'Too loud' = Alto demais."},
-    "quiet": {"translation": "quieto, silencioso, calmo", "pos": "adjetivo", "tip": "'Be quiet' = Fique quieto."},
-    "calm": {"translation": "calmo, tranquilo", "pos": "adjetivo", "tip": "'Stay calm' = Fique calmo."},
-    "cool": {"translation": "legal, fresco, descolado", "pos": "adjetivo", "tip": "'That's cool!' = Que legal!"},
-    "warm": {"translation": "morno, caloroso, acolhedor", "pos": "adjetivo", "tip": "'Warm welcome' = Boas-vindas calorosas."},
-    "cold": {"translation": "frio, resfriado", "pos": "adjetivo / substantivo", "tip": "'It's cold outside' = Está frio lá fora."},
-    "hot": {"translation": "quente, apimentado", "pos": "adjetivo", "tip": "'Hot coffee' = Café quente."},
-    "rain": {"translation": "chuva, chover", "pos": "substantivo / verbo", "tip": "'It's raining' = Está chovendo."},
-    "sunny": {"translation": "ensolarado", "pos": "adjetivo", "tip": "'Sunny day' = Dia de sol."},
-    "cloudy": {"translation": "nublado", "pos": "adjetivo", "tip": "'Cloudy sky' = Céu nublado."},
-    "compliment": {"translation": "elogio, elogiar", "pos": "substantivo / verbo", "tip": "'Give a compliment' = Fazer um elogio."},
-    "compliments": {"translation": "elogios", "pos": "substantivo", "tip": "Plural de compliment."},
-    "common": {"translation": "comum, frequente", "pos": "adjetivo", "tip": "'Common sense' = Bom senso."},
-    "popular": {"translation": "popular, famoso", "pos": "adjetivo", "tip": "'Very popular' = Muito conhecido."},
-    "interesting": {"translation": "interessante", "pos": "adjetivo", "tip": "'Sounds interesting!' = Parece interessante!"},
-    "boring": {"translation": "chato, entediante", "pos": "adjetivo", "tip": "'Not boring at all' = Nem um pouco chato."},
-    "fun": {"translation": "divertido, diversão", "pos": "adjetivo / substantivo", "tip": "'Have fun!' = Divirta-se!"},
-    "break": {"translation": "pausa, intervalo, quebrar", "pos": "substantivo / verbo", "tip": "'Take a break' = Fazer uma pausa."},
-    "finish": {"translation": "terminar, concluir", "pos": "verbo", "tip": "'Finish line' = Linha de chegada."},
-    "learn": {"translation": "aprender", "pos": "verbo", "tip": "'Learn English' = Aprender inglês."},
-    "teach": {"translation": "ensinar", "pos": "verbo", "tip": "'Teach someone' = Ensinar alguém."},
-    "study": {"translation": "estudar, estudo", "pos": "verbo / substantivo", "tip": "'Study hard' = Estude com afinco."},
-    "remember": {"translation": "lembrar, recordar", "pos": "verbo", "tip": "'Remember that' = Lembre-se disso."},
-    "forget": {"translation": "esquecer", "pos": "verbo", "tip": "'Don't forget' = Não esqueça."},
-    "choose": {"translation": "escolher", "pos": "verbo", "tip": "'Choose wisely' = Escolha com sabedoria."},
-    "decide": {"translation": "decidir", "pos": "verbo", "tip": "'You decide' = Você decide."},
-    "hope": {"translation": "esperar, torcer, esperança", "pos": "verbo / substantivo", "tip": "'I hope so' = Espero que sim."},
-    "wish": {"translation": "desejar, vontade, desejo", "pos": "verbo / substantivo", "tip": "'Make a wish' = Faça um pedido."},
-    "believe": {"translation": "acreditar, crer", "pos": "verbo", "tip": "'Believe in yourself' = Acredite em você."},
-    "share": {"translation": "compartilhar, dividir", "pos": "verbo", "tip": "'Share your thoughts' = Compartilhe seus pensamentos."},
-    "care": {"translation": "importar-se, cuidar", "pos": "verbo / substantivo", "tip": "'Take care' = Cuide-se."},
-    "worry": {"translation": "preocupar-se", "pos": "verbo", "tip": "'Don't worry' = Não se preocupe."},
-    "enjoy": {"translation": "aproveitar, curtir", "pos": "verbo", "tip": "'Enjoy your meal' = Bom apetite / aproveite."},
-    "hate": {"translation": "odiar", "pos": "verbo", "tip": "'I hate traffic' = Odeio trânsito."},
-    "love": {"translation": "amar, adorar, amor", "pos": "verbo / substantivo", "tip": "'I'd love to' = Adoraria."},
-    "like": {"translation": "gostar de, como", "pos": "verbo / preposição", "tip": "'I like that' = Gostei disso."},
-    "mistake": {"translation": "erro, engano", "pos": "substantivo", "tip": "'Make a mistake' = Cometer um erro."},
-    "feeling": {"translation": "sentimento, sensação", "pos": "substantivo", "tip": "'Good feeling' = Sensação boa."},
-    "opinion": {"translation": "opinião", "pos": "substantivo", "tip": "'In my opinion' = Na minha opinião."},
-    "truth": {"translation": "verdade", "pos": "substantivo", "tip": "'Tell the truth' = Falar a verdade."},
-    "world": {"translation": "mundo", "pos": "substantivo", "tip": "'All over the world' = Pelo mundo todo."},
-    "city": {"translation": "cidade", "pos": "substantivo", "tip": "'Big city' = Cidade grande."},
-    "food": {"translation": "comida, alimento", "pos": "substantivo", "tip": "'Delicious food' = Comida deliciosa."},
-    "water": {"translation": "água", "pos": "substantivo", "tip": "'Drink water' = Beber água."},
-    "drink": {"translation": "beber, bebida", "pos": "verbo / substantivo", "tip": "'Have a drink' = Tomar uma bebida."},
-    "eat": {"translation": "comer", "pos": "verbo", "tip": "'Let's eat' = Vamos comer."},
-    "buy": {"translation": "comprar", "pos": "verbo", "tip": "'Buy tickets' = Comprar ingressos."},
-    "cheap": {"translation": "barato, em conta", "pos": "adjetivo", "tip": "'Very cheap' = Muito barato."},
-    "expensive": {"translation": "caro", "pos": "adjetivo", "tip": "'Too expensive' = Caro demais."},
-    "open": {"translation": "abrir, aberto", "pos": "verbo / adjetivo", "tip": "'Open the door' = Abra a porta."},
-    "close": {"translation": "fechar, próximo", "pos": "verbo / adjetivo", "tip": "'Close friends' = Amigos próximos."},
-    "clean": {"translation": "limpar, limpo", "pos": "verbo / adjetivo", "tip": "'Keep it clean' = Mantenha limpo."},
-    "new": {"translation": "novo, recente", "pos": "adjetivo", "tip": "'Brand new' = Novinho em folha."},
-    "old": {"translation": "velho, antigo", "pos": "adjetivo", "tip": "'Old friend' = Amigo antigo."},
-    "big": {"translation": "grande, importante", "pos": "adjetivo", "tip": "'Big news' = Grande notícia."},
-    "chance": {"translation": "chance, oportunidade", "pos": "substantivo", "tip": "'Take a chance' = Arriscar / dar uma chance."},
-    "reason": {"translation": "razão, motivo", "pos": "substantivo", "tip": "'The reason why' = O motivo pelo qual."},
-    "choice": {"translation": "escolha, opção", "pos": "substantivo", "tip": "'Good choice' = Boa escolha."},
-    "goal": {"translation": "meta, objetivo, gol", "pos": "substantivo", "tip": "'Reach your goals' = Atingir suas metas."},
-    "plan": {"translation": "plano, planejar", "pos": "substantivo / verbo", "tip": "'What's the plan?' = Qual é o plano?"},
-    "future": {"translation": "futuro", "pos": "substantivo", "tip": "'In the future' = No futuro."},
-    "moment": {"translation": "momento, instante", "pos": "substantivo", "tip": "'Just a moment' = Só um instante."},
-}
-
-
 @router.post("/translate", response_model=TranslateResponse)
 def translate_text(
     payload: TranslateRequest,
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Translates English sentence to Portuguese with multiple robust fallbacks.
+    Translates English sentence or term to Portuguese with idiomatic chunk lookup
+    and multiple online fallbacks.
     """
     text = payload.text.strip()
     if not text:
@@ -289,31 +83,11 @@ def translate_text(
     if cache_key in _TRANSLATION_CACHE and _TRANSLATION_CACHE[cache_key].strip().lower() != cache_key:
         return TranslateResponse(original=text, translation=_TRANSLATION_CACHE[cache_key])
 
-    # Strategy 0: Instant built-in core dictionary lookup with stem/inflection support
-    clean_single = re.sub(r'[^a-zA-Z]', '', text.lower())
-    if " " not in text:
-        # Exact match
-        if clean_single in CORE_DICTIONARY:
-            primary = CORE_DICTIONARY[clean_single]["translation"].split(",")[0].strip()
-            _TRANSLATION_CACHE[cache_key] = primary
-            return TranslateResponse(original=text, translation=primary)
-        # Suffix matching: plurals or verb inflections
-        if clean_single.endswith('s') and len(clean_single) > 3 and clean_single[:-1] in CORE_DICTIONARY:
-            primary = CORE_DICTIONARY[clean_single[:-1]]["translation"].split(",")[0].strip()
-            _TRANSLATION_CACHE[cache_key] = primary
-            return TranslateResponse(original=text, translation=primary)
-        if clean_single.endswith('es') and len(clean_single) > 4 and clean_single[:-2] in CORE_DICTIONARY:
-            primary = CORE_DICTIONARY[clean_single[:-2]]["translation"].split(",")[0].strip()
-            _TRANSLATION_CACHE[cache_key] = primary
-            return TranslateResponse(original=text, translation=primary)
-        if clean_single.endswith('ing') and len(clean_single) > 4 and clean_single[:-3] in CORE_DICTIONARY:
-            primary = CORE_DICTIONARY[clean_single[:-3]]["translation"].split(",")[0].strip()
-            _TRANSLATION_CACHE[cache_key] = primary
-            return TranslateResponse(original=text, translation=primary)
-        if clean_single.endswith('ed') and len(clean_single) > 4 and clean_single[:-2] in CORE_DICTIONARY:
-            primary = CORE_DICTIONARY[clean_single[:-2]]["translation"].split(",")[0].strip()
-            _TRANSLATION_CACHE[cache_key] = primary
-            return TranslateResponse(original=text, translation=primary)
+    # Strategy 0: Instant built-in idiomatic phrasal verb & core dictionary lookup
+    local_hit = lookup_local_translation(text)
+    if local_hit and local_hit.strip().lower() != cache_key:
+        _TRANSLATION_CACHE[cache_key] = local_hit
+        return TranslateResponse(original=text, translation=local_hit)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -378,15 +152,89 @@ def translate_text(
     except Exception as e:
         print(f"Strategy 4 Translation error: {e}")
 
-    # Strategy 5: Lemmatized or individual token fallback for short phrases/words
-    tokens = [re.sub(r'[^a-zA-Z]', '', tok).lower() for tok in text.split()]
-    dict_matches = [CORE_DICTIONARY[t]["translation"].split(",")[0].strip() for t in tokens if t in CORE_DICTIONARY]
-    if dict_matches:
-        fallback_trans = " ".join(dict_matches)
-        _TRANSLATION_CACHE[cache_key] = fallback_trans
-        return TranslateResponse(original=text, translation=fallback_trans)
+    # Strategy 5: Single-word dictionary fallback ONLY (never mangle multi-word expressions)
+    if " " not in text:
+        clean_tok = re.sub(r'[^a-zA-Z]', '', text.lower())
+        if clean_tok in CORE_DICTIONARY:
+            fallback_trans = CORE_DICTIONARY[clean_tok]["translation"].split(",")[0].strip()
+            _TRANSLATION_CACHE[cache_key] = fallback_trans
+            return TranslateResponse(original=text, translation=fallback_trans)
 
     return TranslateResponse(original=text, translation=text)
+
+
+def translate_batch(terms: List[str], batch_size: int = 15) -> Dict[str, str]:
+    """
+    Translate a list of English terms into Portuguese using grouped newline requests
+    to minimize external HTTP calls and avoid rate limits on shared cloud IPs.
+    """
+    results: Dict[str, str] = {}
+    remaining: List[str] = []
+
+    for term in terms:
+        clean = (term or "").strip()
+        if not clean:
+            continue
+        cache_key = clean.lower()
+        if cache_key in _TRANSLATION_CACHE and _TRANSLATION_CACHE[cache_key].strip().lower() != cache_key:
+            results[term] = _TRANSLATION_CACHE[cache_key]
+            continue
+        local_hit = lookup_local_translation(clean)
+        if local_hit and local_hit.strip().lower() != cache_key:
+            _TRANSLATION_CACHE[cache_key] = local_hit
+            results[term] = local_hit
+            continue
+        remaining.append(term)
+
+    if not remaining:
+        return results
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+
+    for start in range(0, len(remaining), batch_size):
+        chunk = remaining[start : start + batch_size]
+        joined = "\n".join(chunk)
+        batch_resolved = False
+
+        for client_id in ("gtx", "dict-chrome-ex"):
+            try:
+                url = (
+                    f"https://translate.googleapis.com/translate_a/single"
+                    f"?client={client_id}&sl=en&tl=pt&dt=t&q={urllib.parse.quote(joined)}"
+                )
+                res = requests.get(url, headers=headers, timeout=6)
+                if res.status_code != 200:
+                    continue
+                data = res.json()
+                if not (data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list)):
+                    continue
+                translated_block = "".join([part[0] for part in data[0] if part and len(part) > 0 and part[0]])
+                lines = [ln.strip() for ln in translated_block.splitlines()]
+                if len(lines) == len(chunk):
+                    for orig, tr in zip(chunk, lines):
+                        if tr and tr.lower() != orig.strip().lower():
+                            _TRANSLATION_CACHE[orig.strip().lower()] = tr
+                            results[orig] = tr
+                    batch_resolved = True
+                    break
+            except Exception as e:
+                print(f"Batch translation notice ({client_id}): {e}")
+
+        if not batch_resolved:
+            # Individual fallback only for terms not resolved in batch
+            for orig in chunk:
+                if orig in results:
+                    continue
+                try:
+                    single_res = translate_text(TranslateRequest(text=orig), current_user=None)
+                    if single_res.translation and single_res.translation.strip().lower() != orig.strip().lower():
+                        results[orig] = single_res.translation.strip()
+                except Exception:
+                    pass
+
+    return results
 
 
 @router.post("/explain", response_model=ExplainResponse)
@@ -659,25 +507,63 @@ def chat_with_tutor(
     return ChatResponse(reply=reply)
 
 
+def _split_tts_chunks(text: str, max_len: int = 180) -> List[str]:
+    """Split longer sentences cleanly for Google TTS endpoint limits."""
+    words = text.split()
+    chunks: List[str] = []
+    current = ""
+    for w in words:
+        candidate = f"{current} {w}".strip() if current else w
+        if len(candidate) <= max_len:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = w
+    if current:
+        chunks.append(current)
+    return chunks or [text[:max_len]]
+
+
+def _fetch_gtts_audio(text: str, lang_code: str) -> bytes:
+    """Server-side fallback using Google Translate TTS returning valid MP3 bytes."""
+    audio_parts: List[bytes] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    for chunk in _split_tts_chunks(text):
+        res = requests.get(
+            "https://translate.google.com/translate_tts",
+            params={"ie": "UTF-8", "q": chunk, "tl": lang_code, "client": "tw-ob"},
+            headers=headers,
+            timeout=6,
+        )
+        if res.status_code == 200 and res.content:
+            audio_parts.append(res.content)
+    return b"".join(audio_parts)
+
+
 @router.get("/tts")
 async def text_to_speech(
-    text: str = Query(..., description="The English phrase or word to synthesize"),
-    voice: Optional[str] = Query("male", description="Voice ID or shortcut: male, female, guy, ava, british_male, british_female"),
-    rate: Optional[str] = Query("+0%", description="Speech speed adjustment: +0%, -10%, +10%"),
+    text: str = Query(..., description="The phrase or word to synthesize"),
+    voice: Optional[str] = Query("male", description="Voice ID or shortcut: male, female, guy, ava, british_male, british_female, pt_female, pt_male"),
+    rate: Optional[str] = Query("+0%", description="Speech speed adjustment: +0%, -15%, +10%"),
+    lang: Optional[str] = Query(None, description="Optional language override: en or pt"),
 ):
     """
-    Synthesize natural, human-grade native English speech audio using Azure Neural TTS.
-    Returns audio/mpeg directly for instant browser HTML5 playback.
+    Synthesize natural, human-grade speech audio using Azure Neural TTS,
+    with automatic Google TTS server-side fallback for uninterrupted background audio.
     """
     clean_text = text.strip()
     if not clean_text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-    # Resolve voice name
+    # Resolve voice name and language
     resolved_voice = VOICE_MAP.get((voice or "").lower().strip(), voice) or "en-US-ChristopherNeural"
     clean_rate = rate.strip() if rate else "+0%"
+    resolved_lang = (lang or ("pt" if resolved_voice.lower().startswith("pt-") else "en")).lower().strip()
 
-    cache_key = f"{resolved_voice}_{clean_rate}_{clean_text.lower()}"
+    cache_key = f"{resolved_voice}_{clean_rate}_{resolved_lang}_{clean_text.lower()}"
     if cache_key in _TTS_CACHE:
         return Response(
             content=_TTS_CACHE[cache_key],
@@ -689,32 +575,41 @@ async def text_to_speech(
             }
         )
 
+    audio_bytes = b""
+    tts_source = "neural"
+
     try:
         communicate = edge_tts.Communicate(clean_text, resolved_voice, rate=clean_rate)
         audio_stream = io.BytesIO()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_stream.write(chunk["data"])
-
         audio_bytes = audio_stream.getvalue()
-        if not audio_bytes:
-            raise ValueError("TTS engine produced empty audio stream.")
-
-        # Cache up to 1000 items in memory
-        if len(_TTS_CACHE) < 1000:
-            _TTS_CACHE[cache_key] = audio_bytes
-
-        return Response(
-            content=audio_bytes,
-            media_type="audio/mpeg",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Content-Disposition": "inline; filename=speech.mp3",
-                "X-TTS-Source": "neural"
-            }
-        )
     except Exception as e:
-        print(f"Neural TTS generation notice: {e}")
-        raise HTTPException(status_code=500, detail=f"TTS generation error: {str(e)}")
+        print(f"Neural TTS notice (trying GTTS fallback): {e}")
+
+    if not audio_bytes:
+        try:
+            gtts_lang = "pt-BR" if resolved_lang.startswith("pt") else "en"
+            audio_bytes = _fetch_gtts_audio(clean_text, gtts_lang)
+            tts_source = "gtts-fallback"
+        except Exception as fallback_err:
+            print(f"GTTS fallback notice: {fallback_err}")
+
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="TTS generation error: unable to synthesize speech")
+
+    if len(_TTS_CACHE) < 1000:
+        _TTS_CACHE[cache_key] = audio_bytes
+
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Disposition": "inline; filename=speech.mp3",
+            "X-TTS-Source": tts_source
+        }
+    )
 
 

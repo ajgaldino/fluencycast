@@ -1,16 +1,33 @@
 import re
 import uuid
-from typing import List, Dict, Any, Optional, Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from typing import Any, Dict, Iterator, List, Optional
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
+from app.api.v1.endpoints.ai import (
+    _TRANSLATION_CACHE,
+    translate_batch,
+)
 from app.models.phrase import SavedPhrase
 from app.models.transcript import TranscriptSegment
-from app.api.v1.endpoints.ai import translate_text, TranslateRequest, CORE_DICTIONARY, _TRANSLATION_CACHE
+from app.services.dictionary_data import (
+    CORE_DICTIONARY,
+    PHRASAL_VERBS_AND_CHUNKS,
+    build_chunk_pattern,
+    lemmatize_word,
+    lookup_local_translation,
+)
 
-# Comprehensive English stopwords and conversation fillers to skip
+# Exported for backward compatibility with ai.py /chat
+COMMON_PHRASAL_VERBS_AND_CHUNKS: List[str] = list(PHRASAL_VERBS_AND_CHUNKS.keys())
+
+_COMPILED_CHUNK_PATTERNS = [
+    (chunk, meta, build_chunk_pattern(chunk))
+    for chunk, meta in PHRASAL_VERBS_AND_CHUNKS.items()
+]
+
+# Comprehensive English stopwords, conversation fillers, channel boilerplate, and proper names to skip
 STOPWORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
     "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
@@ -32,57 +49,100 @@ STOPWORDS = {
     "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with",
     "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've",
     "your", "yours", "yourself", "yourselves",
-    # Spoken fillers, numbers, musical sounds
+    # Spoken fillers, contractions, numbers, and musical markers
     "okay", "ok", "oh", "yes", "yeah", "yep", "hey", "just", "also", "really",
-    "get", "go", "got", "like", "one", "two", "three", "four", "see",
-    "gonna", "wanna", "gotta", "kinda", "sorta", "dude", "cool", "whoa", "huh",
-    "umm", "um", "uh", "ah", "ha", "haha", "cause", "cuz", "alright", "yall",
-    "guys", "guy", "bye", "hello", "hi", "etc", "la", "na", "something", "everything",
-    # Contraction stems without apostrophe
-    "don", "doesn", "didn", "haven", "hasn", "hadn", "won", "wouldn", "shouldn", "couldn",
-    "aren", "isn", "wasn", "weren",
-    # Residual transcript labels
-    "segundo", "segundos", "minuto", "minutos", "hora", "horas", "music", "música", "musica"
+    "get", "got", "go", "goes", "going", "like", "one", "two", "three", "four",
+    "five", "six", "seven", "eight", "nine", "ten", "gonna", "wanna", "gotta",
+    "kinda", "sorta", "dude", "cool", "whoa", "huh", "umm", "um", "uh", "ah",
+    "ha", "haha", "cause", "cuz", "alright", "yall", "guys", "guy", "bye",
+    "hello", "hi", "etc", "la", "na", "something", "everything", "nothing", "anything",
+    "don", "doesn", "didn", "haven", "hasn", "hadn", "won", "wouldn", "shouldn",
+    "couldn", "aren", "isn", "wasn", "weren",
+    # Residual transcript labels & channel boilerplate
+    "segundo", "segundos", "minuto", "minutos", "hora", "horas", "music", "música", "musica",
+    "emily", "paul", "english", "channel", "youtube", "podcast", "episode", "welcome",
+    "everyone", "anyone", "someone", "everybody", "anybody", "somebody", "nobody",
+    "goodbye", "thanks", "thank", "today", "tonight", "topic", "lesson", "video", "videos",
 }
-
-
-# High-frequency Phrasal Verbs & Conversational Chunks common in dialogues and songs
-COMMON_PHRASAL_VERBS_AND_CHUNKS = [
-    # Phrasal verbs
-    "figure out", "point out", "find out", "give up", "give in", "look for", "look after", "look up to",
-    "turn out", "turn down", "turn up", "turn on", "turn off", "carry on", "go on", "go through",
-    "come up with", "come across", "run out of", "get along", "get over", "get by", "get back",
-    "break down", "break up", "bring up", "bring about", "put off", "put up with", "hold on",
-    "hang out", "deal with", "calm down", "settle down", "show up", "stand out", "take over",
-    "take off", "check in", "check out", "fall apart", "pass out", "end up", "count on",
-    # Conversational connectors and idioms (Mr. English Channel style)
-    "fair enough", "to be honest", "as a matter of fact", "at the end of the day", "in the long run",
-    "make sense", "make up your mind", "make up my mind", "catch up", "on the other hand",
-    "by the way", "no worries", "never mind", "safe to say", "speak of the devil", "hit the nail on the head",
-    "piece of cake", "under the weather", "so far so good", "keep in touch", "out of the blue"
-]
 
 COMMON_BASIC_WORDS = {
-    "hello", "hi", "good", "morning", "afternoon", "night", "day", "yes", "no", "yeah", "yep",
-    "please", "thanks", "thank", "welcome", "man", "woman", "boy", "girl", "friend", "people",
-    "person", "name", "time", "year", "week", "month", "today", "tomorrow", "yesterday",
-    "house", "home", "car", "room", "door", "water", "food", "book", "hand", "eye", "head",
-    "face", "city", "country", "world", "school", "number", "money", "thing", "things"
+    "hello", "hi", "good", "great", "nice", "fine", "best", "better", "morning",
+    "afternoon", "night", "day", "days", "yes", "no", "yeah", "yep", "please",
+    "thanks", "thank", "welcome", "man", "woman", "boy", "girl", "friend", "friends",
+    "people", "person", "name", "time", "times", "year", "years", "week", "weeks",
+    "month", "months", "today", "tomorrow", "yesterday", "house", "home", "car",
+    "room", "door", "water", "food", "book", "hand", "eye", "head", "face",
+    "city", "country", "world", "school", "number", "money", "thing", "things",
+    "word", "words", "life", "work", "back", "ever", "else", "maybe", "every",
+    "little", "still", "even", "well", "actually", "basically", "always", "never",
+    "often", "already", "again", "another", "first", "second", "last", "next",
+    "small", "long", "short", "high", "right", "left", "part", "place", "start",
+    "starts", "started", "know", "knew", "feel", "felt", "make", "made", "take",
+    "took", "come", "came", "give", "gave", "look", "looked", "looking", "want",
+    "need", "said", "says", "tell", "told", "talk", "talking", "find", "found",
+    "keep", "kept", "help", "helps", "mean", "try", "tried", "trying", "use",
+    "used", "using", "easy", "hard", "real", "true", "sure", "kind", "sort",
+    "able", "away", "around", "behind", "without", "across", "along", "toward",
+    "towards", "since", "though", "although", "whether", "either", "neither",
+    "learn", "learning", "learner", "learners", "practice", "write", "read",
+    "listen", "listening", "speaking", "conversation", "answer", "question",
 }
+
+_RICH_SUFFIXES = (
+    "tion", "sion", "ment", "ness", "ity", "ive", "ous",
+    "ful", "less", "able", "ible", "ence", "ance", "ly",
+)
+
+
+def _score_word_candidate(term: str, freq: int, other_video_terms: set[str]) -> float:
+    """Rank candidate words to surface genuinely useful B1-B2 vocabulary."""
+    score = 0.0
+    if len(term) >= 7:
+        score += 3.0
+    elif len(term) == 6:
+        score += 2.0
+    elif len(term) == 5:
+        score += 1.0
+
+    if term.endswith(_RICH_SUFFIXES):
+        score += 2.0
+
+    if 2 <= freq <= 6:
+        score += 3.0
+    elif freq > 6:
+        score += 1.5
+    else:
+        score += 1.0
+
+    if term not in other_video_terms:
+        score += 2.0
+
+    if term in CORE_DICTIONARY:
+        score += 1.5
+
+    return score
+
+
+def _distribute_evenly(items: List[Any], cap: int) -> List[Any]:
+    """Select up to `cap` items evenly spaced across a sorted timeline list."""
+    if len(items) <= cap:
+        return items
+    step = len(items) / cap
+    return [items[int(i * step)] for i in range(cap)]
+
 
 def iter_extract_keywords_for_video(
     video_id: str,
     user_id: str,
     db: Session,
-    max_keywords: Optional[int] = 20
+    max_keywords: Optional[int] = None,
+    refresh: bool = False,
 ) -> Iterator[Dict[str, Any]]:
     """
-    Generator that extracts high-value vocabulary and yields real-time progress events:
-    1. 'keywords_found': candidate count and pre-cached translations count
-    2. 'translating': emitted as each uncached word finishes translation
-    3. 'keywords_done': emitted once all SavedPhrase rows are committed, with 'phrases'
+    Extracts high-value phrasal verbs, conversational chunks, and B1-B2 vocabulary distributed
+    evenly across the entire video (0% -> 100%), translating via local idiomatic dictionaries
+    and grouped batch requests, while yielding SSE progress events.
     """
-    # 1. Fetch all transcript segments for this video
     segments = (
         db.query(TranscriptSegment)
         .filter(TranscriptSegment.video_id == video_id)
@@ -93,116 +153,229 @@ def iter_extract_keywords_for_video(
         yield {"stage": "keywords_done", "completed": 0, "total": 0, "phrases": []}
         return
 
-    full_transcript_lower = " ".join([seg.text.lower() for seg in segments])
+    if refresh:
+        # Replace only unreviewed auto-extracted cards; preserve user-saved SENTENCE & studied cards
+        db.query(SavedPhrase).filter(
+            SavedPhrase.user_id == user_id,
+            SavedPhrase.video_id == video_id,
+            SavedPhrase.status == "NEW",
+            SavedPhrase.repetitions == 0,
+            SavedPhrase.phrase_type.in_(["WORD", "PHRASAL_VERB", "EXPRESSION"]),
+        ).delete(synchronize_session=False)
+        db.flush()
 
-    # 2. Existing items already saved for THIS specific video
     existing_video_items = {
         p.text.strip().lower()
         for p in db.query(SavedPhrase)
         .filter(
             SavedPhrase.user_id == user_id,
-            SavedPhrase.video_id == video_id
+            SavedPhrase.video_id == video_id,
         )
         .all()
         if p.text
     }
 
-    items_to_create: List[Dict[str, Any]] = []
-    seen_in_batch = set()
+    other_video_terms = {
+        p.text.strip().lower()
+        for p in db.query(SavedPhrase.text)
+        .filter(
+            SavedPhrase.user_id == user_id,
+            SavedPhrase.video_id != video_id,
+        )
+        .all()
+        if p.text
+    }
 
-    # Priority A: Check for Phrasal Verbs & Chunks
-    for chunk in COMMON_PHRASAL_VERBS_AND_CHUNKS:
-        pattern = r'\b' + re.escape(chunk) + r'\b'
-        if re.search(pattern, full_transcript_lower):
-            if chunk not in existing_video_items and chunk not in seen_in_batch:
-                # Find matching segment for context sentence and timestamp
-                matching_seg = None
-                for seg in segments:
-                    if re.search(pattern, seg.text.lower()):
-                        matching_seg = seg
-                        break
-                if matching_seg:
-                    seen_in_batch.add(chunk)
-                    items_to_create.append({
-                        "text": chunk,
-                        "type": "PHRASAL_VERB" if len(chunk.split()) <= 3 and any(chunk.startswith(v) for v in ["get", "look", "turn", "go", "come", "run", "take", "break", "put", "hold", "hang", "deal", "figure", "give", "carry"]) else "EXPRESSION",
-                        "context_sentence": matching_seg.text.strip(),
-                        "timestamp": matching_seg.start_time,
-                        "segment_id": matching_seg.id
-                    })
+    target_limit = max_keywords if (max_keywords and max_keywords > 0) else 35
 
-    # Priority B: Extract rich single words (lemmatized/cleaned, skipping basic words)
-    target_limit = max_keywords if (max_keywords and max_keywords > 0) else 25
+    # Priority A: Match inflected phrasal verbs & conversational chunks across ALL segments
+    chunk_candidates: List[Dict[str, Any]] = []
+    seen_chunks: set[str] = set()
+    non_intro_start_idx = 2 if len(segments) > 4 else 0
 
-    for seg in segments:
-        tokens = re.findall(r'\b[a-zA-Z]{4,}\b', seg.text)
-        for t in tokens:
-            clean_w = t.strip().lower()
+    for chunk, meta, pattern in _COMPILED_CHUNK_PATTERNS:
+        if chunk in existing_video_items or chunk in seen_chunks:
+            continue
+
+        matching_seg = None
+        fallback_intro_seg = None
+        for idx, seg in enumerate(segments):
+            if pattern.search(seg.text):
+                if idx >= non_intro_start_idx:
+                    matching_seg = seg
+                    break
+                if fallback_intro_seg is None:
+                    fallback_intro_seg = seg
+
+        chosen_seg = matching_seg or fallback_intro_seg
+        if chosen_seg is not None:
+            seen_chunks.add(chunk)
+            chunk_candidates.append({
+                "text": chunk,
+                "type": meta["type"],
+                "context_sentence": chosen_seg.text.strip(),
+                "timestamp": chosen_seg.start_time,
+                "segment_id": chosen_seg.id,
+                "preset_translation": meta["translation"],
+            })
+
+    chunk_candidates.sort(key=lambda c: c["timestamp"])
+    max_chunk_slots = min(15, target_limit)
+    selected_chunks = _distribute_evenly(chunk_candidates, max_chunk_slots)
+    seen_in_batch: set[str] = {c["text"] for c in selected_chunks}
+
+    # Priority B: Scan ALL segments to gather non-intro word candidates & frequency
+    word_stats: Dict[str, Dict[str, Any]] = {}
+    proper_noun_flags: Dict[str, bool] = {}  # True if seen in lowercase or sentence-initial normal context
+
+    for idx, seg in enumerate(segments):
+        is_intro = idx < non_intro_start_idx
+        for match in re.finditer(r"\b[a-zA-Z]{4,}\b", seg.text):
+            raw_tok = match.group(0)
+            clean_w = raw_tok.lower()
             if clean_w in STOPWORDS or clean_w in COMMON_BASIC_WORDS:
                 continue
-            if clean_w in existing_video_items or clean_w in seen_in_batch:
+
+            item_term = lemmatize_word(clean_w)
+            if (
+                not item_term
+                or len(item_term) < 4
+                or item_term in STOPWORDS
+                or item_term in COMMON_BASIC_WORDS
+            ):
                 continue
-
-            # Lemmatize plural 's' or 'es' if stem is valid
-            stem_candidate = clean_w
-            if clean_w.endswith("ies") and len(clean_w) > 4:
-                stem_candidate = clean_w[:-3] + "y"
-            elif clean_w.endswith("es") and len(clean_w) > 4 and clean_w[:-2] in CORE_DICTIONARY:
-                stem_candidate = clean_w[:-2]
-            elif clean_w.endswith("s") and len(clean_w) > 3 and clean_w[:-1] in CORE_DICTIONARY:
-                stem_candidate = clean_w[:-1]
-
-            item_term = stem_candidate if stem_candidate in CORE_DICTIONARY else clean_w
             if item_term in existing_video_items or item_term in seen_in_batch:
                 continue
 
-            seen_in_batch.add(item_term)
-            items_to_create.append({
-                "text": item_term,
-                "type": "WORD",
-                "context_sentence": seg.text.strip(),
-                "timestamp": seg.start_time,
-                "segment_id": seg.id
-            })
+            # Detect mid-sentence proper names (capitalized after normal words, not in dictionary)
+            prefix = seg.text[: match.start()].rstrip()
+            at_sentence_start = not prefix or prefix.endswith((".", "!", "?", '"', "'", ":"))
+            is_normal_usage = raw_tok.islower() or at_sentence_start or item_term in CORE_DICTIONARY
+            if is_normal_usage:
+                proper_noun_flags[item_term] = True
+            else:
+                proper_noun_flags.setdefault(item_term, False)
 
-            if len(items_to_create) >= target_limit:
+            if item_term not in word_stats:
+                word_stats[item_term] = {
+                    "term": item_term,
+                    "freq": 0,
+                    "seg": seg,
+                    "seg_idx": idx,
+                    "has_non_intro": False,
+                }
+
+            entry = word_stats[item_term]
+            entry["freq"] += 1
+
+            seg_len = len(seg.text.strip())
+            cur_len = len(entry["seg"].text.strip())
+            cur_is_ideal = 40 <= cur_len <= 180
+            new_is_ideal = 40 <= seg_len <= 180
+
+            if (not entry["has_non_intro"] and not is_intro) or (
+                not is_intro and not cur_is_ideal and new_is_ideal
+            ):
+                entry["seg"] = seg
+                entry["seg_idx"] = idx
+                if not is_intro:
+                    entry["has_non_intro"] = True
+
+    # Filter out terms that only ever appeared capitalized mid-sentence
+    word_candidates = [
+        info for term, info in word_stats.items() if proper_noun_flags.get(term, True)
+    ]
+
+    word_budget = max(0, target_limit - len(selected_chunks))
+    selected_words: List[Dict[str, Any]] = []
+
+    if word_candidates and word_budget > 0:
+        min_ts = segments[0].start_time
+        max_ts = segments[-1].start_time
+        span = max_ts - min_ts
+        num_segs = max(len(segments), 1)
+        num_buckets = 5
+        buckets: List[List[tuple[float, Dict[str, Any]]]] = [[] for _ in range(num_buckets)]
+
+        for info in word_candidates:
+            score = _score_word_candidate(info["term"], info["freq"], other_video_terms)
+            if span > 0:
+                ratio = (info["seg"].start_time - min_ts) / span
+            else:
+                ratio = info["seg_idx"] / num_segs
+            bucket_idx = min(num_buckets - 1, max(0, int(ratio * num_buckets)))
+            buckets[bucket_idx].append((score, info))
+
+        for bucket in buckets:
+            bucket.sort(key=lambda item: (item[0], item[1]["freq"], len(item[1]["term"])), reverse=True)
+
+        # Round-robin selection across the 5 timeline buckets guarantees 0% -> 100% video coverage
+        while len(selected_words) < word_budget:
+            picked_any = False
+            for bucket in buckets:
+                if bucket and len(selected_words) < word_budget:
+                    _, chosen = bucket.pop(0)
+                    seg = chosen["seg"]
+                    seen_in_batch.add(chosen["term"])
+                    selected_words.append({
+                        "text": chosen["term"],
+                        "type": "WORD",
+                        "context_sentence": seg.text.strip(),
+                        "timestamp": seg.start_time,
+                        "segment_id": seg.id,
+                    })
+                    picked_any = True
+            if not picked_any:
                 break
-        if len(items_to_create) >= target_limit:
-            break
 
-    if not items_to_create:
+        selected_words.sort(key=lambda w: w["timestamp"])
+
+    selected_items = (selected_chunks + selected_words)[:target_limit]
+    if not selected_items:
         yield {"stage": "keywords_done", "completed": 0, "total": 0, "phrases": []}
         return
 
-    selected_items = items_to_create[:target_limit]
-
-    # 3. Retrieve translations
+    # 3. Retrieve idiomatic & accurate translations (preset -> local dict -> cache -> batch)
     translations: Dict[str, str] = {}
     words_needing_translation: List[str] = []
 
     db_translations = {
-        p.text.lower(): p.translation
+        p.text.strip().lower(): p.translation.strip()
         for p in db.query(SavedPhrase.text, SavedPhrase.translation)
         .filter(
             SavedPhrase.user_id == user_id,
             SavedPhrase.translation != None,
-            SavedPhrase.translation != ""
+            SavedPhrase.translation != "",
         )
         .all()
-        if p.translation
+        if p.text
+        and p.translation
+        and p.translation.strip() not in ("", "Sem tradução cadastrada", "Significado em contexto")
+        and p.translation.strip().lower() != p.text.strip().lower()
     }
 
     for item in selected_items:
         w = item["text"]
-        clean = re.sub(r'[^a-zA-Z]', '', w.lower())
-        if clean in CORE_DICTIONARY:
-            translations[w] = CORE_DICTIONARY[clean]["translation"].split(",")[0].strip()
-        elif w in _TRANSLATION_CACHE and _TRANSLATION_CACHE[w].strip().lower() != w.strip().lower():
-            translations[w] = _TRANSLATION_CACHE[w]
-        elif w in db_translations and db_translations[w].strip().lower() != w.strip().lower():
-            translations[w] = db_translations[w]
-        else:
-            words_needing_translation.append(w)
+        w_lower = w.strip().lower()
+
+        if item.get("preset_translation"):
+            translations[w] = item["preset_translation"]
+            continue
+
+        local_tr = lookup_local_translation(w)
+        if local_tr:
+            translations[w] = local_tr
+            continue
+
+        if w_lower in _TRANSLATION_CACHE and _TRANSLATION_CACHE[w_lower].strip().lower() != w_lower:
+            translations[w] = _TRANSLATION_CACHE[w_lower]
+            continue
+
+        if w_lower in db_translations:
+            translations[w] = db_translations[w_lower]
+            continue
+
+        words_needing_translation.append(w)
 
     already_translated = len(selected_items) - len(words_needing_translation)
     yield {
@@ -213,41 +386,23 @@ def iter_extract_keywords_for_video(
     }
 
     if words_needing_translation:
-        def fetch_trans(word_to_tr: str):
-            try:
-                res = translate_text(TranslateRequest(text=word_to_tr), current_user=None)
-                trans = res.translation.strip()
-                if trans and trans.lower() != word_to_tr.lower():
-                    return word_to_tr, trans
-                return word_to_tr, ""
-            except Exception:
-                return word_to_tr, ""
-
         done_count = already_translated
-        pool = ThreadPoolExecutor(max_workers=8)
-        timed_out = False
-        try:
-            futures = {pool.submit(fetch_trans, w): w for w in words_needing_translation}
-            for future in as_completed(futures, timeout=40):
-                word_orig = futures[future]
-                try:
-                    w, tr = future.result()
-                    if tr and tr.strip().lower() != w.strip().lower():
-                        translations[w] = tr
-                except Exception:
-                    pass
-                done_count += 1
-                yield {
-                    "stage": "translating",
-                    "completed": done_count,
-                    "total": len(selected_items),
-                    "current_word": word_orig,
-                }
-        except TimeoutError:
-            # Avoid waiting on hung external translation requests; fall back for remaining terms.
-            timed_out = True
-        finally:
-            pool.shutdown(wait=not timed_out, cancel_futures=timed_out)
+        batch_size = 15
+        for start in range(0, len(words_needing_translation), batch_size):
+            batch_terms = words_needing_translation[start : start + batch_size]
+            try:
+                batch_res = translate_batch(batch_terms, batch_size=batch_size)
+                translations.update(batch_res)
+            except Exception as err:
+                print(f"[Vocabulary] Batch translation notice: {err}")
+
+            done_count = min(len(selected_items), done_count + len(batch_terms))
+            yield {
+                "stage": "translating",
+                "completed": done_count,
+                "total": len(selected_items),
+                "current_word": batch_terms[-1],
+            }
 
     # 4. Save entities in bulk
     now = datetime.now(timezone.utc)
@@ -257,11 +412,8 @@ def iter_extract_keywords_for_video(
         w = item["text"]
         trans = translations.get(w, "")
         if not trans or trans.strip().lower() == w.strip().lower() or trans == "Sem tradução cadastrada":
-            clean_w = re.sub(r'[^a-zA-Z]', '', w.lower())
-            if clean_w in CORE_DICTIONARY:
-                trans = CORE_DICTIONARY[clean_w]["translation"].split(",")[0].strip()
-            else:
-                trans = "Significado em contexto"
+            local_fallback = lookup_local_translation(w)
+            trans = local_fallback if local_fallback else "Significado em contexto"
 
         phrase_id = str(uuid.uuid4())
         phrase = SavedPhrase(
@@ -280,7 +432,7 @@ def iter_extract_keywords_for_video(
             ease_factor=2.5,
             interval_days=0,
             next_review_at=now,
-            created_at=now
+            created_at=now,
         )
         db.add(phrase)
         created_ids.append(phrase_id)
@@ -305,16 +457,17 @@ def extract_keywords_for_video(
     video_id: str,
     user_id: str,
     db: Session,
-    max_keywords: Optional[int] = 20
+    max_keywords: Optional[int] = None,
+    refresh: bool = False,
 ) -> List[SavedPhrase]:
     """
-    Extracts high-value vocabulary:
-    1. First prioritizes multi-word phrasal verbs and idioms (CHUNKS) found in the transcript!
-    2. Then extracts relevant medium/advanced keywords, filtering out super basic words.
-    3. Caps to max_keywords (default 20) to prevent deck drowning.
+    Extracts high-value phrasal verbs, idioms, and B1-B2 vocabulary distributed across
+    the entire video and persists them as flashcards.
     """
     created_phrases: List[SavedPhrase] = []
-    for event in iter_extract_keywords_for_video(video_id, user_id, db, max_keywords=max_keywords):
+    for event in iter_extract_keywords_for_video(
+        video_id, user_id, db, max_keywords=max_keywords, refresh=refresh
+    ):
         if event.get("stage") == "keywords_done":
             created_phrases = event.get("phrases", [])
     return created_phrases
@@ -323,13 +476,9 @@ def extract_keywords_for_video(
 def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100) -> int:
     """
     Finds saved phrases/words belonging to this user where translation is missing,
-    empty, or identical to the English original (e.g. 'quick' -> 'quick').
-    Translates them using CORE_DICTIONARY and online fallbacks, and persists the
-    repaired translation to the database.
-    Returns the number of repaired phrases.
+    empty, or identical to the English original, and repairs them using local
+    idiomatic dictionaries plus grouped batch translation.
     """
-    from sqlalchemy import or_
-
     untranslated_phrases = (
         db.query(SavedPhrase)
         .filter(
@@ -338,8 +487,9 @@ def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100
                 SavedPhrase.translation == None,
                 SavedPhrase.translation == "",
                 SavedPhrase.translation == "Sem tradução cadastrada",
-                func.lower(func.trim(SavedPhrase.translation)) == func.lower(func.trim(SavedPhrase.text))
-            )
+                SavedPhrase.translation == "Significado em contexto",
+                func.lower(func.trim(SavedPhrase.translation)) == func.lower(func.trim(SavedPhrase.text)),
+            ),
         )
         .limit(limit)
         .all()
@@ -349,35 +499,25 @@ def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100
         return 0
 
     repaired_count = 0
+    needs_online: List[SavedPhrase] = []
+
     for phrase in untranslated_phrases:
-        text_clean = (phrase.text or "").strip().lower()
-        clean_w = re.sub(r'[^a-zA-Z]', '', text_clean)
-
-        new_trans = ""
-        # 1. CORE_DICTIONARY check
-        if clean_w in CORE_DICTIONARY:
-            new_trans = CORE_DICTIONARY[clean_w]["translation"].split(",")[0].strip()
-        elif clean_w.endswith('s') and len(clean_w) > 3 and clean_w[:-1] in CORE_DICTIONARY:
-            new_trans = CORE_DICTIONARY[clean_w[:-1]]["translation"].split(",")[0].strip()
-        elif clean_w.endswith('es') and len(clean_w) > 4 and clean_w[:-2] in CORE_DICTIONARY:
-            new_trans = CORE_DICTIONARY[clean_w[:-2]]["translation"].split(",")[0].strip()
-        elif clean_w.endswith('ing') and len(clean_w) > 4 and clean_w[:-3] in CORE_DICTIONARY:
-            new_trans = CORE_DICTIONARY[clean_w[:-3]]["translation"].split(",")[0].strip()
-        elif clean_w.endswith('ed') and len(clean_w) > 4 and clean_w[:-2] in CORE_DICTIONARY:
-            new_trans = CORE_DICTIONARY[clean_w[:-2]]["translation"].split(",")[0].strip()
-
-        # 2. Online translate fallback
-        if not new_trans:
-            try:
-                res = translate_text(TranslateRequest(text=phrase.text), current_user=None)
-                if res.translation and res.translation.strip().lower() != text_clean:
-                    new_trans = res.translation.strip()
-            except Exception:
-                pass
-
-        if new_trans and new_trans.strip().lower() != text_clean:
-            phrase.translation = new_trans
+        orig_text = (phrase.text or "").strip()
+        local_hit = lookup_local_translation(orig_text)
+        if local_hit and local_hit.strip().lower() != orig_text.lower():
+            phrase.translation = local_hit
             repaired_count += 1
+        elif orig_text:
+            needs_online.append(phrase)
+
+    if needs_online:
+        batch_results = translate_batch([p.text.strip() for p in needs_online if p.text])
+        for phrase in needs_online:
+            key = (phrase.text or "").strip()
+            tr = batch_results.get(key)
+            if tr and tr.strip().lower() != key.lower():
+                phrase.translation = tr.strip()
+                repaired_count += 1
 
     if repaired_count > 0:
         try:
@@ -394,4 +534,3 @@ def get_video_filter_condition(video_id: str, user_id: str, db: Session):
     Cards are individual per video (video_id).
     """
     return SavedPhrase.video_id == video_id
-
