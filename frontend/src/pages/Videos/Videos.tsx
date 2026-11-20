@@ -1,10 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { videoService } from '../../services/videos';
+import React, { useState, useEffect, useRef } from 'react';
+import { videoService, VideoProcessStage, VideoStreamProgress } from '../../services/videos';
 import { Video } from '../../types/video';
-import { Plus, Video as VideoIcon, Trash2, CheckCircle2, AlertCircle, Loader2, ArrowRight, FileText, Sparkles } from 'lucide-react';
+import { Plus, Video as VideoIcon, Trash2, CheckCircle2, AlertCircle, Loader2, ArrowRight, Sparkles, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-type ProcessingStep = 'idle' | 'fetching' | 'transcribing' | 'saving' | 'ready' | 'error';
+type ProcessingStep = 'idle' | 'processing' | 'ready' | 'error';
+type ActiveStage = 'connecting' | VideoProcessStage;
+
+const PIPELINE_STAGES: Array<{ id: VideoProcessStage; label: string }> = [
+  { id: 'metadata', label: 'Identificando vídeo no YouTube' },
+  { id: 'transcript', label: 'Processando e segmentando transcrição' },
+  { id: 'saving', label: 'Salvando frases sincronizadas no banco' },
+  { id: 'keywords', label: 'Extraindo e traduzindo flashcards-chave' },
+];
+
+const STAGE_ORDER: Record<ActiveStage, number> = {
+  connecting: -1,
+  metadata: 0,
+  transcript: 1,
+  saving: 2,
+  keywords: 3,
+  finalizing: 4,
+};
 
 import { SAMPLE_CONTENTS, SampleVideo } from '../../data/sampleVideos';
 
@@ -18,6 +35,18 @@ export const Videos: React.FC = () => {
   const [step, setStep] = useState<ProcessingStep>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdVideo, setCreatedVideo] = useState<Video | null>(null);
+
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [currentStage, setCurrentStage] = useState<ActiveStage>('connecting');
+  const [statusMessage, setStatusMessage] = useState('Conectando ao servidor...');
+  const [statusDetail, setStatusDetail] = useState<string | null>(null);
+  const [keywordsProgress, setKeywordsProgress] = useState<{ completed: number; total: number; currentWord?: string } | null>(null);
+  const [summaryCounts, setSummaryCounts] = useState<{ segments?: number; keywords?: number }>({});
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [receivedServerEvent, setReceivedServerEvent] = useState(false);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortReasonRef = useRef<'user' | 'timeout' | null>(null);
   const navigate = useNavigate();
 
   const loadVideos = async () => {
@@ -33,14 +62,32 @@ export const Videos: React.FC = () => {
 
   useEffect(() => {
     loadVideos();
+    return () => {
+      abortReasonRef.current = 'user';
+      abortControllerRef.current?.abort();
+    };
   }, []);
+
+  useEffect(() => {
+    if (step !== 'processing') return;
+    const timer = window.setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [step]);
+
+  const formatElapsed = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
   const handleProcessVideo = async (e?: React.FormEvent, customPayload?: { url: string; category: 'video' | 'music'; raw_transcript?: string; forceAuto?: boolean }) => {
     if (e) e.preventDefault();
     const targetUrl = (customPayload?.url || url).trim();
     const targetCategory = customPayload?.category || category;
-    const targetTranscript = customPayload?.raw_transcript !== undefined 
-      ? customPayload.raw_transcript 
+    const targetTranscript = customPayload?.raw_transcript !== undefined
+      ? customPayload.raw_transcript
       : manualTranscript.trim();
 
     if (!targetUrl) return;
@@ -51,30 +98,100 @@ export const Videos: React.FC = () => {
       return;
     }
 
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    abortReasonRef.current = null;
+
+    const timeoutId = window.setTimeout(() => {
+      abortReasonRef.current = 'timeout';
+      controller.abort();
+    }, 150000);
+
     setErrorMessage(null);
-    setStep('fetching');
+    setStep('processing');
+    setProgressPercent(4);
+    setCurrentStage('connecting');
+    setStatusMessage('Conectando ao servidor...');
+    setStatusDetail(null);
+    setKeywordsProgress(null);
+    setSummaryCounts({});
+    setElapsedSeconds(0);
+    setReceivedServerEvent(false);
 
     try {
-      const fetchTimer = setTimeout(() => setStep('transcribing'), 1000);
-      const savingTimer = setTimeout(() => setStep('saving'), 2000);
+      const result = await videoService.createVideoStream(
+        {
+          url: targetUrl,
+          category: targetCategory,
+          raw_transcript: targetTranscript || undefined
+        },
+        (ev: VideoStreamProgress) => {
+          setReceivedServerEvent(true);
+          if (typeof ev.progress === 'number') {
+            setProgressPercent(ev.progress);
+          }
+          if (ev.stage) {
+            setCurrentStage(ev.stage);
+          }
+          if (ev.message) {
+            setStatusMessage(ev.message);
+          }
+          if (ev.detail) {
+            setStatusDetail(ev.detail);
+          }
+          if (typeof ev.total === 'number' && typeof ev.completed === 'number') {
+            setKeywordsProgress({
+              completed: ev.completed,
+              total: ev.total,
+              currentWord: ev.current_word,
+            });
+          }
+          if (typeof ev.segments_count === 'number' || typeof ev.keywords_count === 'number') {
+            setSummaryCounts((prev) => ({
+              segments: ev.segments_count ?? prev.segments,
+              keywords: ev.keywords_count ?? prev.keywords,
+            }));
+          }
+        },
+        controller.signal
+      );
 
-      const video = await videoService.createVideo({
-        url: targetUrl,
-        category: targetCategory,
-        raw_transcript: targetTranscript || undefined
-      });
+      window.clearTimeout(timeoutId);
+      abortControllerRef.current = null;
 
-      clearTimeout(fetchTimer);
-      clearTimeout(savingTimer);
-
-      setCreatedVideo(video);
+      setSummaryCounts((prev) => ({
+        segments: result.segmentsCount ?? result.video.segments?.length ?? prev.segments,
+        keywords: result.keywordsCount ?? prev.keywords,
+      }));
+      setProgressPercent(100);
+      setCreatedVideo(result.video);
       setStep('ready');
-      setVideos((prev) => [video, ...prev.filter((v) => v.id !== video.id)]);
+      setVideos((prev) => [result.video, ...prev.filter((v) => v.id !== result.video.id)]);
     } catch (err: any) {
+      window.clearTimeout(timeoutId);
+      abortControllerRef.current = null;
+
+      if (err?.name === 'AbortError' || abortReasonRef.current === 'user') {
+        if (abortReasonRef.current === 'timeout') {
+          setStep('error');
+          setErrorMessage('O processamento excedeu o tempo limite (150s). Tente novamente — o servidor pode ter acabado de acordar.');
+        }
+        return;
+      }
+
       setStep('error');
-      const msg = err.message || 'Falha ao processar vídeo';
+      const msg = err?.message || 'Falha ao processar vídeo';
       setErrorMessage(msg);
     }
+  };
+
+  const handleCancelProcessing = () => {
+    abortReasonRef.current = 'user';
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setStep('idle');
+    setErrorMessage('Processamento cancelado. Seu link e transcrição continuam preenchidos abaixo.');
   };
 
   const handleSelectSample = (sample: SampleVideo) => {
@@ -89,12 +206,20 @@ export const Videos: React.FC = () => {
   };
 
   const resetModal = () => {
+    abortReasonRef.current = 'user';
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setShowAddModal(false);
     setUrl('');
     setManualTranscript('');
     setStep('idle');
     setErrorMessage(null);
     setCreatedVideo(null);
+    setProgressPercent(0);
+    setKeywordsProgress(null);
+    setSummaryCounts({});
+    setElapsedSeconds(0);
+    setStatusDetail(null);
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -268,29 +393,122 @@ export const Videos: React.FC = () => {
           )}
 
           {/* Progress Indicator */}
-          {(step === 'fetching' || step === 'transcribing' || step === 'saving') && (
-            <div style={{ padding: '1rem 0' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'fetching' ? 'var(--primary)' : 'var(--accent-emerald)' }}>
-                  {step === 'fetching' ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
-                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
-                    {step === 'fetching' ? 'Buscando metadados do vídeo...' : '✓ Vídeo identificado no YouTube'}
+          {step === 'processing' && (
+            <div style={{ padding: '0.5rem 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
+                    Preparando lição em tempo real
                   </span>
+                  <span className="badge badge-primary">{progressPercent}%</span>
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' }}>
+                  <Clock size={14} />
+                  <span>{formatElapsed(elapsedSeconds)}</span>
+                </div>
+              </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'transcribing' ? 'var(--primary)' : (step === 'saving' ? 'var(--accent-emerald)' : 'var(--text-muted)') }}>
-                  {step === 'transcribing' ? <Loader2 size={18} className="animate-spin" /> : (step === 'saving' ? <CheckCircle2 size={18} /> : <div style={{ width: 18 }} />)}
-                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
-                    {step === 'transcribing' ? 'Obtendo e dividindo transcrição em frases...' : (step === 'saving' ? '✓ Transcrição segmentada' : 'Processamento da transcrição')}
-                  </span>
-                </div>
+              {/* Smooth Progress Bar */}
+              <div style={{
+                width: '100%',
+                height: '10px',
+                borderRadius: '9999px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                overflow: 'hidden',
+                marginBottom: '1rem'
+              }}>
+                <div
+                  className="progress-bar-fill"
+                  style={{
+                    width: `${Math.max(progressPercent, 4)}%`,
+                    height: '100%',
+                    borderRadius: '9999px',
+                    transition: 'width 0.35s ease'
+                  }}
+                />
+              </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: step === 'saving' ? 'var(--primary)' : 'var(--text-muted)' }}>
-                  {step === 'saving' ? <Loader2 size={18} className="animate-spin" /> : <div style={{ width: 18 }} />}
-                  <span style={{ fontSize: '0.92rem', fontWeight: 500 }}>
-                    {step === 'saving' ? 'Preparando lição e sincronização...' : 'Preparando lição'}
-                  </span>
+              {/* Live Server Status Banner */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                padding: '0.75rem 0.9rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-glass)',
+                border: '1px solid var(--border-subtle)',
+                marginBottom: '1rem',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0, flex: 1 }}>
+                  <Loader2 size={17} className="animate-spin" color="var(--primary)" style={{ flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {!receivedServerEvent && elapsedSeconds >= 4
+                        ? 'Conectando ao servidor... (pode levar até 40s se o Render estiver acordando)'
+                        : statusMessage}
+                    </div>
+                    {statusDetail && (
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {statusDetail}
+                      </div>
+                    )}
+                  </div>
                 </div>
+                {keywordsProgress && keywordsProgress.total > 0 && (
+                  <span className="badge badge-amber" style={{ flexShrink: 0 }}>
+                    {keywordsProgress.completed} / {keywordsProgress.total} flashcards
+                  </span>
+                )}
+              </div>
+
+              {/* 4-Stage Pipeline Checklist */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.1rem' }}>
+                {PIPELINE_STAGES.map((stage) => {
+                  const stageIdx = STAGE_ORDER[stage.id];
+                  const activeIdx = STAGE_ORDER[currentStage];
+                  const isDone = activeIdx > stageIdx;
+                  const isActive = activeIdx === stageIdx;
+
+                  let suffix = '';
+                  if (stage.id === 'saving' && summaryCounts.segments !== undefined) {
+                    suffix = ` (${summaryCounts.segments} frases)`;
+                  } else if (stage.id === 'keywords' && keywordsProgress && keywordsProgress.total > 0) {
+                    suffix = ` (${keywordsProgress.completed}/${keywordsProgress.total})`;
+                  }
+
+                  return (
+                    <div
+                      key={stage.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.6rem',
+                        color: isDone ? 'var(--accent-emerald)' : (isActive ? 'var(--text-primary)' : 'var(--text-muted)'),
+                        fontSize: '0.88rem',
+                        fontWeight: isActive ? 600 : 500
+                      }}
+                    >
+                      {isDone ? (
+                        <CheckCircle2 size={17} style={{ flexShrink: 0 }} />
+                      ) : isActive ? (
+                        <Loader2 size={17} className="animate-spin" color="var(--primary)" style={{ flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 17, height: 17, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor', opacity: 0.45 }} />
+                        </div>
+                      )}
+                      <span>{stage.label}{suffix}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={handleCancelProcessing} className="btn btn-secondary" style={{ padding: '0.45rem 0.9rem', fontSize: '0.84rem' }}>
+                  Cancelar
+                </button>
               </div>
             </div>
           )}
@@ -303,7 +521,11 @@ export const Videos: React.FC = () => {
                 <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>Lição e Flashcards prontos!</span>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem', marginBottom: '1.1rem' }}>
-                ✨ As palavras-chave deste vídeo foram extraídas e adicionadas automaticamente aos seus <strong>Flashcards</strong> para você aprender antes de ouvi-lo.
+                ✨ {summaryCounts.segments ? `${summaryCounts.segments} frases sincronizadas e ` : ''}
+                {summaryCounts.keywords !== undefined
+                  ? `${summaryCounts.keywords} flashcards adicionados automaticamente`
+                  : 'As palavras-chave deste vídeo foram extraídas e adicionadas automaticamente aos seus Flashcards'}{' '}
+                para você aprender antes de ouvi-lo.
               </p>
 
               <div className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.25rem', background: 'var(--bg-glass)' }}>

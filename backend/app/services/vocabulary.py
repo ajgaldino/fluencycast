@@ -1,6 +1,7 @@
 import re
-from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor
+import uuid
+from typing import List, Dict, Any, Optional, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -69,17 +70,17 @@ COMMON_BASIC_WORDS = {
     "face", "city", "country", "world", "school", "number", "money", "thing", "things"
 }
 
-def extract_keywords_for_video(
+def iter_extract_keywords_for_video(
     video_id: str,
     user_id: str,
     db: Session,
     max_keywords: Optional[int] = 20
-) -> List[SavedPhrase]:
+) -> Iterator[Dict[str, Any]]:
     """
-    Extracts high-value vocabulary:
-    1. First prioritizes multi-word phrasal verbs and idioms (CHUNKS) found in the transcript!
-    2. Then extracts relevant medium/advanced keywords, filtering out super basic words.
-    3. Caps to max_keywords (default 20) to prevent deck drowning.
+    Generator that extracts high-value vocabulary and yields real-time progress events:
+    1. 'keywords_found': candidate count and pre-cached translations count
+    2. 'translating': emitted as each uncached word finishes translation
+    3. 'keywords_done': emitted once all SavedPhrase rows are committed, with 'phrases'
     """
     # 1. Fetch all transcript segments for this video
     segments = (
@@ -89,7 +90,8 @@ def extract_keywords_for_video(
         .all()
     )
     if not segments:
-        return []
+        yield {"stage": "keywords_done", "completed": 0, "total": 0, "phrases": []}
+        return
 
     full_transcript_lower = " ".join([seg.text.lower() for seg in segments])
 
@@ -169,7 +171,8 @@ def extract_keywords_for_video(
             break
 
     if not items_to_create:
-        return []
+        yield {"stage": "keywords_done", "completed": 0, "total": 0, "phrases": []}
+        return
 
     selected_items = items_to_create[:target_limit]
 
@@ -201,6 +204,14 @@ def extract_keywords_for_video(
         else:
             words_needing_translation.append(w)
 
+    already_translated = len(selected_items) - len(words_needing_translation)
+    yield {
+        "stage": "keywords_found",
+        "total": len(selected_items),
+        "completed": already_translated,
+        "to_translate": len(words_needing_translation),
+    }
+
     if words_needing_translation:
         def fetch_trans(word_to_tr: str):
             try:
@@ -212,15 +223,35 @@ def extract_keywords_for_video(
             except Exception:
                 return word_to_tr, ""
 
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            results = list(pool.map(fetch_trans, words_needing_translation))
-            for w, tr in results:
-                if tr and tr.strip().lower() != w.strip().lower():
-                    translations[w] = tr
+        done_count = already_translated
+        pool = ThreadPoolExecutor(max_workers=8)
+        timed_out = False
+        try:
+            futures = {pool.submit(fetch_trans, w): w for w in words_needing_translation}
+            for future in as_completed(futures, timeout=40):
+                word_orig = futures[future]
+                try:
+                    w, tr = future.result()
+                    if tr and tr.strip().lower() != w.strip().lower():
+                        translations[w] = tr
+                except Exception:
+                    pass
+                done_count += 1
+                yield {
+                    "stage": "translating",
+                    "completed": done_count,
+                    "total": len(selected_items),
+                    "current_word": word_orig,
+                }
+        except TimeoutError:
+            # Avoid waiting on hung external translation requests; fall back for remaining terms.
+            timed_out = True
+        finally:
+            pool.shutdown(wait=not timed_out, cancel_futures=timed_out)
 
-    # 4. Save entities
+    # 4. Save entities in bulk
     now = datetime.now(timezone.utc)
-    created_phrases: List[SavedPhrase] = []
+    created_ids: List[str] = []
 
     for item in selected_items:
         w = item["text"]
@@ -232,7 +263,9 @@ def extract_keywords_for_video(
             else:
                 trans = "Significado em contexto"
 
+        phrase_id = str(uuid.uuid4())
         phrase = SavedPhrase(
+            id=phrase_id,
             user_id=user_id,
             video_id=video_id,
             transcript_segment_id=item["segment_id"],
@@ -250,12 +283,40 @@ def extract_keywords_for_video(
             created_at=now
         )
         db.add(phrase)
-        created_phrases.append(phrase)
+        created_ids.append(phrase_id)
 
     db.commit()
-    for p in created_phrases:
-        db.refresh(p)
+    rows_by_id = (
+        {p.id: p for p in db.query(SavedPhrase).filter(SavedPhrase.id.in_(created_ids)).all()}
+        if created_ids
+        else {}
+    )
+    created_phrases = [rows_by_id[pid] for pid in created_ids if pid in rows_by_id]
 
+    yield {
+        "stage": "keywords_done",
+        "completed": len(selected_items),
+        "total": len(selected_items),
+        "phrases": created_phrases,
+    }
+
+
+def extract_keywords_for_video(
+    video_id: str,
+    user_id: str,
+    db: Session,
+    max_keywords: Optional[int] = 20
+) -> List[SavedPhrase]:
+    """
+    Extracts high-value vocabulary:
+    1. First prioritizes multi-word phrasal verbs and idioms (CHUNKS) found in the transcript!
+    2. Then extracts relevant medium/advanced keywords, filtering out super basic words.
+    3. Caps to max_keywords (default 20) to prevent deck drowning.
+    """
+    created_phrases: List[SavedPhrase] = []
+    for event in iter_extract_keywords_for_video(video_id, user_id, db, max_keywords=max_keywords):
+        if event.get("stage") == "keywords_done":
+            created_phrases = event.get("phrases", [])
     return created_phrases
 
 

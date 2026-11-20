@@ -323,7 +323,7 @@ def translate_text(
     try:
         encoded_query = urllib.parse.quote(text)
         url = f"https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=en&tl=pt&dt=t&q={encoded_query}"
-        res = requests.get(url, headers=headers, timeout=6)
+        res = requests.get(url, headers=headers, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
@@ -337,7 +337,7 @@ def translate_text(
     # Strategy 2: Google translate gtx with browser headers
     try:
         url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=pt&dt=t&q={urllib.parse.quote(text)}"
-        res = requests.get(url, headers=headers, timeout=6)
+        res = requests.get(url, headers=headers, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
@@ -351,7 +351,7 @@ def translate_text(
     # Strategy 3: Google translate webapp client
     try:
         url = f"https://translate.googleapis.com/translate_a/single?client=webapp&sl=en&tl=pt&dt=t&q={urllib.parse.quote(text)}"
-        res = requests.get(url, headers=headers, timeout=6)
+        res = requests.get(url, headers=headers, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
@@ -367,7 +367,7 @@ def translate_text(
         res = requests.get(
             "https://api.mymemory.translated.net/get",
             params={"q": text, "langpair": "en|pt-BR"},
-            timeout=6
+            timeout=4
         )
         if res.status_code == 200:
             data = res.json()

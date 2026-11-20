@@ -406,3 +406,24 @@ a:hover {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* Spin & Progress Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes progressShimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.progress-bar-fill {
+  background: linear-gradient(90deg, #6366f1 0%, #a855f7 50%, #06b6d4 100%);
+  background-size: 200% 100%;
+  animation: progressShimmer 2.4s linear infinite;
+}
+

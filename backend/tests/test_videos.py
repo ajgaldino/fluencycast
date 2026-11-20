@@ -141,4 +141,57 @@ def test_parse_transcript_text_compound_minutes_and_seconds():
     assert segments[3]["text"].startswith('And then you could just say, "Yes, it\'s my favorite."')
 
 
+def test_create_video_stream_progress(client, monkeypatch):
+    import json
+    from app.api.v1.endpoints import videos as videos_endpoint
+
+    email = "streamtest@fluencycast.com"
+    pwd = "ValidPassword123"
+    client.post("/api/v1/auth/register", json={"email": email, "password": pwd, "full_name": "Stream Tester"})
+    login_res = client.post("/api/v1/auth/login", json={"email": email, "password": pwd})
+    token = login_res.json()["access_token"]
+
+    monkeypatch.setattr(
+        videos_endpoint,
+        "get_video_metadata",
+        lambda vid: {
+            "title": "Mr. English Stream Test",
+            "channel": "Mr. English Channel",
+            "thumbnail_url": f"https://img.youtube.com/vi/{vid}/hqdefault.jpg",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/videos/stream",
+        json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "category": "video",
+            "raw_transcript": "0:00 Learning English every morning helps build confidence and plan your future.\n0:06 Good morning friend, share your honest opinion today.",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+
+    events = [
+        json.loads(line[len("data: "):])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert len(events) >= 5
+
+    progress_values = [ev["progress"] for ev in events if "progress" in ev]
+    assert progress_values == sorted(progress_values)
+
+    stages = {ev.get("stage") for ev in events if ev.get("type") == "progress"}
+    assert {"metadata", "transcript", "saving", "keywords", "finalizing"}.issubset(stages)
+
+    final_event = events[-1]
+    assert final_event["type"] == "complete"
+    assert final_event["progress"] == 100
+    assert final_event["segments_count"] >= 2
+    assert final_event["video"]["id"]
+    assert final_event["video"]["title"] == "Mr. English Stream Test"
+
+
 
