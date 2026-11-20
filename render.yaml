@@ -9,19 +9,10 @@ services:
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: fluencycast-db
-          property: connectionString
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "10080"
       - key: PYTHON_VERSION
         value: 3.11.9
-
-databases:
-  # Managed PostgreSQL Database on Render
-  - name: fluencycast-db
-    databaseName: fluency_cast
-    user: fluency_user
-    plan: free
