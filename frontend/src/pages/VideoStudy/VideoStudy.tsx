@@ -177,13 +177,17 @@ export const VideoStudy: React.FC = () => {
     async function loadData() {
       try {
         setLoading(true);
-        const [videoData, savedPhrases] = await Promise.all([
-          videoService.getVideoById(id!),
-          phraseService.getPhrases().catch(() => []),
-        ]);
+        // Fetch video + segments immediately so the player and transcript render without waiting on phrases
+        const phrasesPromise = phraseService.getPhrases(undefined, undefined, id!).catch(() => []);
+        const videoData = await videoService.getVideoById(id!);
 
         if (isMounted) {
           setVideo(videoData);
+          setLoading(false);
+        }
+
+        const savedPhrases = await phrasesPromise;
+        if (isMounted) {
           const videoPhrases = savedPhrases.filter((p: any) => p.video_id === id);
           setSavedPhrasesList(videoPhrases);
           const savedIds = new Set<string>(
@@ -196,9 +200,8 @@ export const VideoStudy: React.FC = () => {
       } catch (err: any) {
         if (isMounted) {
           setError(err.message || 'Erro ao carregar conteúdo do vídeo.');
+          setLoading(false);
         }
-      } finally {
-        if (isMounted) setLoading(false);
       }
     }
 

@@ -354,4 +354,41 @@ def test_translate_no_literal_single_verb_for_phrases(monkeypatch):
     assert unknown == "make xylophoneblorp"
 
 
+def test_auto_repair_offline_never_blocks_get_requests(db_session, monkeypatch):
+    import requests as req_lib
+    from app.models.user import User
+    from app.models.phrase import SavedPhrase
+    from app.services.vocabulary import auto_repair_untranslated_phrases
+
+    # Ensure GET-path auto-repair makes ZERO external network calls
+    monkeypatch.setattr(
+        req_lib,
+        "get",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("GET auto-repair must not make external HTTP calls")),
+    )
+
+    user = User(email="offlinerepair@fluencycast.com", hashed_password="pw", full_name="Offline Repair")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    p1 = SavedPhrase(user_id=user.id, text="business", translation="Significado em contexto", phrase_type="WORD", status="NEW")
+    p2 = SavedPhrase(user_id=user.id, text="probably", translation="Significado em contexto", phrase_type="WORD", status="NEW")
+    p3 = SavedPhrase(user_id=user.id, text="put off", translation="Significado em contexto", phrase_type="PHRASAL_VERB", status="NEW")
+    p4 = SavedPhrase(user_id=user.id, text="unheardofxyzterm", translation="Significado em contexto", phrase_type="WORD", status="NEW")
+    db_session.add_all([p1, p2, p3, p4])
+    db_session.commit()
+
+    repaired = auto_repair_untranslated_phrases(user.id, db_session)
+    assert repaired == 3
+    db_session.refresh(p1)
+    db_session.refresh(p2)
+    db_session.refresh(p3)
+    db_session.refresh(p4)
+    assert p1.translation == "negócio"
+    assert p2.translation == "provavelmente"
+    assert "adiar" in p3.translation.lower()
+    assert p4.translation == "Significado em contexto"
+
+
 

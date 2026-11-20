@@ -693,6 +693,21 @@ CORE_DICTIONARY: Dict[str, Dict[str, str]] = {
     "yet": {"translation": "ainda, mas, porém", "pos": "advérbio / conjunção", "tip": "'Not yet' = Ainda não."},
     "yourself": {"translation": "você mesmo", "pos": "pronome", "tip": "'Be kind to yourself' = Seja gentil com você."},
     "zone": {"translation": "zona, área", "pos": "substantivo", "tip": "'Comfort zone' = Zona de conforto."},
+    "absolutely": {"translation": "absolutamente, com certeza", "pos": "advérbio", "tip": "'Absolutely right!' = Absolutamente certo!"},
+    "appointment": {"translation": "compromisso, consulta, hora marcada", "pos": "substantivo", "tip": "'Doctor's appointment' = Consulta médica."},
+    "beautiful": {"translation": "bonito, lindo, maravilhoso", "pos": "adjetivo", "tip": "'Beautiful morning' = Manhã linda."},
+    "business": {"translation": "negócio, empresa, assunto", "pos": "substantivo", "tip": "'Run a business' = Administrar um negócio."},
+    "classroom": {"translation": "sala de aula", "pos": "substantivo", "tip": "'In the classroom' = Na sala de aula."},
+    "experiment": {"translation": "experimento, experimentar", "pos": "substantivo / verbo", "tip": "'Try a small experiment' = Fazer um pequeno experimento."},
+    "explanation": {"translation": "explicação", "pos": "substantivo", "tip": "'Clear explanation' = Explicação clara."},
+    "impressive": {"translation": "impressionante", "pos": "adjetivo", "tip": "'Impressive progress' = Progresso impressionante."},
+    "information": {"translation": "informação, informações", "pos": "substantivo", "tip": "Incontável em inglês (sem 'informations')."},
+    "investigate": {"translation": "investigar, apurar", "pos": "verbo", "tip": "'Investigate the problem' = Investigar o problema."},
+    "probably": {"translation": "provavelmente", "pos": "advérbio", "tip": "'It will probably work' = Provavelmente vai dar certo."},
+    "quietly": {"translation": "silenciosamente, calmamente", "pos": "advérbio", "tip": "'Listen quietly' = Ouvir em silêncio."},
+    "sentence": {"translation": "frase, sentença", "pos": "substantivo", "tip": "'Practice one sentence' = Praticar uma frase."},
+    "session": {"translation": "sessão, período de estudo", "pos": "substantivo", "tip": "'Study session' = Sessão de estudo."},
+    "treatment": {"translation": "tratamento", "pos": "substantivo", "tip": "'Fair treatment' = Tratamento justo."},
 }
 
 # Map irregular past/participle/gerund forms to base keys in CORE_DICTIONARY

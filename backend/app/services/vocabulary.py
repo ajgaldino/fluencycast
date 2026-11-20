@@ -473,11 +473,17 @@ def extract_keywords_for_video(
     return created_phrases
 
 
-def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100) -> int:
+def auto_repair_untranslated_phrases(
+    user_id: str,
+    db: Session,
+    limit: int = 100,
+    allow_online: bool = False,
+) -> int:
     """
     Finds saved phrases/words belonging to this user where translation is missing,
-    empty, or identical to the English original, and repairs them using local
-    idiomatic dictionaries plus grouped batch translation.
+    empty, or identical to the English original, and repairs them immediately from local
+    idiomatic dictionaries (<10ms). Only calls external translation HTTP APIs when
+    allow_online=True so GET endpoints never block on third-party network calls.
     """
     untranslated_phrases = (
         db.query(SavedPhrase)
@@ -507,10 +513,10 @@ def auto_repair_untranslated_phrases(user_id: str, db: Session, limit: int = 100
         if local_hit and local_hit.strip().lower() != orig_text.lower():
             phrase.translation = local_hit
             repaired_count += 1
-        elif orig_text:
+        elif orig_text and allow_online:
             needs_online.append(phrase)
 
-    if needs_online:
+    if needs_online and allow_online:
         batch_results = translate_batch([p.text.strip() for p in needs_online if p.text])
         for phrase in needs_online:
             key = (phrase.text or "").strip()

@@ -327,11 +327,11 @@ export const Reviews: React.FC = () => {
     try {
       const isAll = scope === 'ALL';
       const vId = videoId !== 'ALL' ? videoId : undefined;
-      const [data, dueData, allData] = await Promise.all([
-        reviewService.getTodayReviews(mode, isAll, vId),
+      const [dueData, allData] = await Promise.all([
         reviewService.getTodayReviews(mode, false, vId),
         reviewService.getTodayReviews(mode, true, vId),
       ]);
+      const data = isAll ? allData : dueData;
       setPhrases(data);
       setDueCount(dueData.length);
       setAllCount(allData.length);
@@ -340,6 +340,15 @@ export const Reviews: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSwitchStudyMethod = (method: 'CHOICE' | 'FLASHCARD' | 'TYPE' | 'CLOZE') => {
+    setStudyMethod(method);
+    setShowTranslation(false);
+    setSelectedChoice(null);
+    setChoiceResult(null);
+    setTypedAnswer('');
+    setTypeResult(null);
   };
 
   const handleVideoFilterChange = (newVideoId: string) => {
@@ -1136,7 +1145,7 @@ export const Reviews: React.FC = () => {
           overflowX: 'auto'
         }}>
           <button
-            onClick={() => setStudyMethod('CHOICE')}
+            onClick={() => handleSwitchStudyMethod('CHOICE')}
             style={{
               flex: 1.2,
               padding: '0.4rem 0.6rem',
@@ -1152,7 +1161,7 @@ export const Reviews: React.FC = () => {
             ⚡ Quiz de Tradução
           </button>
           <button
-            onClick={() => setStudyMethod('FLASHCARD')}
+            onClick={() => handleSwitchStudyMethod('FLASHCARD')}
             style={{
               flex: 1,
               padding: '0.4rem 0.6rem',
@@ -1168,7 +1177,7 @@ export const Reviews: React.FC = () => {
             🃏 Flashcard
           </button>
           <button
-            onClick={() => setStudyMethod('TYPE')}
+            onClick={() => handleSwitchStudyMethod('TYPE')}
             style={{
               flex: 1,
               padding: '0.4rem 0.6rem',
@@ -1184,7 +1193,7 @@ export const Reviews: React.FC = () => {
             ✍️ Digitação
           </button>
           <button
-            onClick={() => setStudyMethod('CLOZE')}
+            onClick={() => handleSwitchStudyMethod('CLOZE')}
             style={{
               flex: 1.1,
               padding: '0.4rem 0.6rem',
