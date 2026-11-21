@@ -234,3 +234,35 @@ def test_auto_repair_untranslated_phrases(client, db_session):
     assert "pequeno" in p2.translation
     assert "seguro" in p3.translation
 
+
+
+def test_create_sentence_deduplication_and_cross_video_extraction(client, db_session):
+    from app.models.video import Video
+    from app.models.transcript import TranscriptSegment
+    from app.services.vocabulary import extract_keywords_for_video
+
+    headers = get_auth_headers(client, email="dedup_extract@fluencycast.com")
+    # Same sentence saved twice -> returns same ID, no duplicate
+    p1 = client.post("/api/v1/phrases/", json={"text": "Never give up on your dreams", "translation": "Nunca desista dos seus sonhos", "phrase_type": "SENTENCE"}, headers=headers)
+    p2 = client.post("/api/v1/phrases/", json={"text": "never give up on your dreams", "translation": "Nunca desista", "phrase_type": "SENTENCE"}, headers=headers)
+    assert p1.status_code == 201 and p2.status_code == 201
+    assert p1.json()["id"] == p2.json()["id"]
+
+    # Extract keywords twice from the same video -> no duplicates
+    from app.models.user import User
+    from app.models.phrase import SavedPhrase
+    user = db_session.query(User).filter(User.email == "dedup_extract@fluencycast.com").first()
+    v1 = Video(id="v-dedup-1", user_id=user.id, youtube_id="yt1", url="https://youtube.com/watch?v=yt1", title="Song 1")
+    db_session.add(v1)
+    db_session.flush()
+    db_session.add(
+        TranscriptSegment(video_id=v1.id, sequence=0, start_time=1.0, end_time=4.0, text="Midnight shadows dancing through the silent garden"),
+    )
+    db_session.flush()
+
+    res1 = extract_keywords_for_video(v1.id, user.id, db_session, max_keywords=10)
+    res2 = extract_keywords_for_video(v1.id, user.id, db_session, max_keywords=10)
+    assert len(res1) > 0
+    assert res2 == []
+    total = db_session.query(SavedPhrase).filter(SavedPhrase.video_id == v1.id).count()
+    assert total == len(res1)

@@ -407,9 +407,14 @@ def iter_extract_keywords_for_video(
     # 4. Save entities in bulk
     now = datetime.now(timezone.utc)
     created_ids: List[str] = []
+    already_saved = set(existing_video_items)
 
     for item in selected_items:
         w = item["text"]
+        w_key = w.strip().lower()
+        if not w_key or w_key in already_saved:
+            continue
+        already_saved.add(w_key)
         trans = translations.get(w, "")
         if not trans or trans.strip().lower() == w.strip().lower() or trans == "Sem tradução cadastrada":
             local_fallback = lookup_local_translation(w)

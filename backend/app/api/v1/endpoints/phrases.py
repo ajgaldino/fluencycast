@@ -77,28 +77,26 @@ def create_saved_phrase(
 
     p_type = (phrase_in.phrase_type or "SENTENCE").upper()
 
-    # Deduplicate single words within the SAME video (or manual without video)
-    if p_type == "WORD":
-        dedup_query = db.query(SavedPhrase).filter(
-            SavedPhrase.user_id == current_user.id,
-            SavedPhrase.video_id == phrase_in.video_id,
-            func.upper(SavedPhrase.phrase_type) == "WORD",
-            func.lower(SavedPhrase.text) == clean_text.lower()
-        )
-        existing = dedup_query.first()
-        if existing:
-            updated = False
-            ex_trans = (existing.translation or "").strip().lower()
-            if (not ex_trans or ex_trans == clean_text.lower() or ex_trans == "sem tradução cadastrada") and trans and trans.lower() != clean_text.lower():
-                existing.translation = trans
-                updated = True
-            if not existing.context_sentence and phrase_in.context_sentence:
-                existing.context_sentence = phrase_in.context_sentence
-                updated = True
-            if updated:
-                db.commit()
-                db.refresh(existing)
-            return existing
+    # Deduplicate phrases/words within the SAME video (or manual without video)
+    dedup_query = db.query(SavedPhrase).filter(
+        SavedPhrase.user_id == current_user.id,
+        SavedPhrase.video_id == phrase_in.video_id,
+        func.lower(SavedPhrase.text) == clean_text.lower(),
+    )
+    existing = dedup_query.first()
+    if existing:
+        updated = False
+        ex_trans = (existing.translation or "").strip().lower()
+        if (not ex_trans or ex_trans == clean_text.lower() or ex_trans == "sem tradução cadastrada") and trans and trans.lower() != clean_text.lower():
+            existing.translation = trans
+            updated = True
+        if not existing.context_sentence and phrase_in.context_sentence:
+            existing.context_sentence = phrase_in.context_sentence
+            updated = True
+        if updated:
+            db.commit()
+            db.refresh(existing)
+        return existing
 
     phrase = SavedPhrase(
         user_id=current_user.id,
