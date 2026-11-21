@@ -10,6 +10,10 @@ import { Phrases } from './pages/Phrases/Phrases';
 import { Reviews } from './pages/Reviews/Reviews';
 import { Progress } from './pages/Progress/Progress';
 import { VideoStudy } from './pages/VideoStudy/VideoStudy';
+import { Games } from './pages/Games/Games';
+import { DuelPlay } from './pages/Games/DuelPlay';
+import { Wordle } from './pages/Games/Wordle';
+import { LiveDuel } from './pages/Games/LiveDuel';
 
 export const App: React.FC = () => {
   return (
@@ -29,6 +33,10 @@ export const App: React.FC = () => {
             <Route path="/phrases" element={<Phrases />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/progress" element={<Progress />} />
+            <Route path="/games" element={<Games />} />
+            <Route path="/games/duel/:id" element={<DuelPlay />} />
+            <Route path="/games/wordle" element={<Wordle />} />
+            <Route path="/games/live/:id" element={<LiveDuel />} />
           </Route>
 
           {/* Catch-all fallback */}

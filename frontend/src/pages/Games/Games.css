@@ -1,0 +1,57 @@
+.games-page { display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px; }
+.games-card { background: var(--gradient-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px; }
+.games-card h2 { font-size: 1rem; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+.games-xp-bar { height: 8px; background: var(--bg-input); border-radius: var(--radius-full); overflow: hidden; margin: 8px 0; }
+.games-xp-fill { height: 100%; background: var(--gradient-primary); transition: width var(--transition-normal); }
+.games-stats-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.games-chip { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: var(--radius-full); padding: 4px 10px; font-size: 0.8rem; color: var(--text-secondary); }
+.games-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+.games-row:last-child { border-bottom: none; }
+.games-row.me { color: var(--accent-amber); font-weight: 600; }
+.games-btn { background: var(--gradient-primary); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 16px; font-weight: 600; cursor: pointer; }
+.games-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.games-btn.secondary { background: var(--bg-glass); border: 1px solid var(--border-subtle); color: var(--text-primary); }
+.games-select { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px; flex: 1; }
+.games-error { color: var(--accent-rose); font-size: 0.85rem; margin-top: 8px; }
+.games-muted { color: var(--text-muted); font-size: 0.85rem; }
+.games-badge-win { color: var(--accent-emerald); } .games-badge-lose { color: var(--accent-rose); }
+
+.duel-question { font-size: 1.6rem; font-weight: 700; text-align: center; margin: 16px 0 20px; }
+.duel-options { display: flex; flex-direction: column; gap: 10px; }
+.duel-option { background: var(--bg-glass); border: 1px solid var(--border-subtle); color: var(--text-primary); border-radius: var(--radius-md); padding: 14px; font-size: 1rem; cursor: pointer; text-align: left; }
+.duel-option:disabled { cursor: default; }
+.duel-option.correct { border-color: var(--accent-emerald); background: rgba(16, 185, 129, 0.18); }
+.duel-option.wrong { border-color: var(--accent-rose); background: rgba(244, 63, 94, 0.18); }
+.duel-progress { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 0.85rem; }
+.duel-result { text-align: center; }
+.duel-result .big { font-size: 2.2rem; font-weight: 800; margin: 8px 0; }
+
+.games-toast { border-color: var(--accent-amber); cursor: pointer; }
+.games-couple { margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-md); background: var(--primary-light); }
+.games-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.games-tab { flex: 1; background: var(--bg-glass); border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: var(--radius-md); padding: 8px; cursor: pointer; }
+.games-tab.active { border-color: var(--border-focus); color: var(--text-primary); background: var(--primary-light); }
+.games-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.games-achv { text-align: center; padding: 8px 4px; border-radius: var(--radius-md); background: var(--bg-glass); border: 1px solid var(--border-subtle); }
+.games-achv.locked { opacity: 0.4; }
+.duel-question.cloze { font-size: 1.2rem; line-height: 1.5; }
+
+.wordle-grid { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.wordle-row { display: flex; gap: 6px; }
+.wordle-cell { width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 800; text-transform: uppercase; border: 2px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.wordle-cell.typing { border-color: var(--text-secondary); }
+.wordle-cell.correct, .wordle-key.correct { background: var(--accent-emerald); border-color: var(--accent-emerald); color: #fff; }
+.wordle-cell.present, .wordle-key.present { background: var(--accent-amber); border-color: var(--accent-amber); color: #fff; }
+.wordle-cell.absent, .wordle-key.absent { background: #374151; border-color: #374151; color: var(--text-muted); }
+.wordle-keyboard { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.wordle-krow { display: flex; gap: 4px; justify-content: center; }
+.wordle-key { min-width: 28px; flex: 1; max-width: 40px; height: 46px; border: none; border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font-weight: 700; text-transform: uppercase; cursor: pointer; }
+.wordle-key.wide { max-width: 56px; flex: 1.5; }
+
+.duel-option.picked { border-color: var(--border-focus); background: var(--primary-light); }
+.live-tag { font-size: 0.7rem; color: var(--text-muted); margin-left: 6px; }
+.live-timer { height: 6px; background: var(--bg-input); border-radius: var(--radius-full); overflow: hidden; }
+.live-timer-fill { height: 100%; background: var(--accent-emerald); transition: width 0.25s linear; }
+.live-timer-fill.reveal { background: var(--accent-amber); }
+.games-live-toggle { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px; }
+.games-bet-box { padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg-glass); border: 1px solid var(--border-subtle); margin-bottom: 10px; }

@@ -21,6 +21,25 @@ async def lifespan(app: FastAPI):
             conn.commit()
     except Exception as e:
         print(f"Notice: Database connection deferred or handled by Alembic: {e}")
+    # create_all never alters existing tables: add columns introduced after first deploy.
+    try:
+        from sqlalchemy import inspect, text
+        insp = inspect(engine)
+        if "duels" in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns("duels")}
+            wanted = {
+                "game_type": "VARCHAR(20) NOT NULL DEFAULT 'VOCAB'",
+                "mode": "VARCHAR(10) NOT NULL DEFAULT 'ASYNC'",
+                "live_phase": "VARCHAR(12)",
+                "live_index": "INTEGER NOT NULL DEFAULT 0",
+                "phase_started_at": "TIMESTAMP",
+            }
+            for name, ddl in wanted.items():
+                if name not in cols:
+                    with engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE duels ADD COLUMN {name} {ddl}"))
+    except Exception as e:
+        print(f"Notice: game_type column check skipped: {e}")
     yield
 
 

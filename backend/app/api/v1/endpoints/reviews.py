@@ -226,6 +226,11 @@ def submit_phrase_review(
     if current_user.profile:
         current_user.profile.last_study_date = now
 
+    # Gamification: reviewing earns XP and counts as activity for the couple streak
+    from app.services import gamification as gm
+    gm.add_xp(db, current_user.id, gm.XP_PER_REVIEW)
+    gm.record_activity(db, current_user.id)
+
     db.commit()
     db.refresh(review)
     return review
