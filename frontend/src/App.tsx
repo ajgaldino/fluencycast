@@ -14,6 +14,7 @@ import { Games } from './pages/Games/Games';
 import { DuelPlay } from './pages/Games/DuelPlay';
 import { Wordle } from './pages/Games/Wordle';
 import { LiveDuel } from './pages/Games/LiveDuel';
+import { MultiplayerMatch } from './pages/Games/MultiplayerMatch';
 
 export const App: React.FC = () => {
   return (
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
             <Route path="/games/duel/:id" element={<DuelPlay />} />
             <Route path="/games/wordle" element={<Wordle />} />
             <Route path="/games/live/:id" element={<LiveDuel />} />
+            <Route path="/games/match/:id" element={<MultiplayerMatch />} />
           </Route>
 
           {/* Catch-all fallback */}

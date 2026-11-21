@@ -96,3 +96,31 @@ class WeeklyBet(Base):
     stake = Column(String(120), nullable=False)
     updated_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at = Column(DateTime, default=_now)
+
+
+
+class MatchQueue(Base):
+    """Matchmaking queue: players wait here until paired into a MultiplayerMatch."""
+    __tablename__ = "match_queue"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    game_type = Column(String(20), nullable=False, index=True)  # HANGMAN, SCRAMBLE
+    status = Column(String(20), default="WAITING", nullable=False, index=True)  # WAITING, MATCHED, CANCELLED
+    match_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class MultiplayerMatch(Base):
+    """Real-time multiplayer match (Hangman, Scramble) created by matchmaking."""
+    __tablename__ = "multiplayer_matches"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    game_type = Column(String(20), nullable=False)  # HANGMAN, SCRAMBLE
+    player1_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    player2_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), default="ACTIVE", nullable=False)  # ACTIVE, FINISHED, CANCELLED
+    state = Column(JSON, nullable=False, default=dict)
+    winner_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime, default=_now)
+    finished_at = Column(DateTime, nullable=True)

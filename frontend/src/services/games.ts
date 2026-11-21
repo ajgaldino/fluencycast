@@ -128,7 +128,87 @@ export const gamesService = {
       method: 'PUT',
       body: JSON.stringify({ stake }),
     }),
+  getQueueStatus: () => request<QueueStatus>('/games/queue/status'),
+  joinQueue: (game_type: MpGameType) =>
+    request<{ matched: boolean; match_id: string | null; game_type: MpGameType }>('/games/queue/join', {
+      method: 'POST',
+      body: JSON.stringify({ game_type }),
+    }),
+  leaveQueue: () => request<{ ok: boolean }>('/games/queue/leave', { method: 'POST' }),
+  getMatch: (id: string) => request<MatchView>(`/games/matches/${id}`),
+  hangmanMove: (id: string, letter: string) =>
+    request<MatchView>(`/games/matches/${id}/hangman`, {
+      method: 'POST',
+      body: JSON.stringify({ letter }),
+    }),
+  scrambleMove: (id: string, guess: string) =>
+    request<MatchView>(`/games/matches/${id}/scramble`, {
+      method: 'POST',
+      body: JSON.stringify({ guess }),
+    }),
+  cancelMatch: (id: string) => request<{ ok: boolean }>(`/games/matches/${id}/cancel`, { method: 'POST' }),
 };
+
+export type MpGameType = 'HANGMAN' | 'SCRAMBLE';
+
+export interface QueueStatus {
+  my_status: 'IDLE' | 'WAITING' | 'MATCHED';
+  my_game_type: MpGameType | null;
+  match_id: string | null;
+  waiting_by_game: Record<string, number>;
+}
+
+export interface MatchView {
+  id: string;
+  game_type: MpGameType;
+  status: 'ACTIVE' | 'FINISHED' | 'CANCELLED';
+  opponent_name: string;
+  is_p1: boolean;
+  winner_id: string | null;
+  i_won: boolean;
+  is_draw: boolean;
+  hit?: boolean;
+  hangman?: {
+    length: number;
+    hint: string;
+    max_errors: number;
+    my_mask: string[];
+    opp_mask: string[];
+    opp_revealed_count: number;
+    my_guessed: string[];
+    my_wrong: number;
+    opp_wrong: number;
+    my_status: 'PLAYING' | 'WON' | 'LOST';
+    opp_status: 'PLAYING' | 'WON' | 'LOST';
+    word: string | null;
+  };
+  scramble?: {
+    round_index: number;
+    total_rounds: number;
+    scrambled: string;
+    hint: string;
+    word_length: number;
+    my_score: number;
+    opp_score: number;
+    last_word: string | null;
+  };
+}
+
+export function queueSocketUrl(): string {
+  const token = encodeURIComponent(localStorage.getItem('fluency_token') || '');
+  const base = /^https?:/.test(API_BASE_URL)
+    ? API_BASE_URL.replace(/^http/, 'ws')
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${API_BASE_URL}`;
+  return `${base}/games/ws/queue?token=${token}`;
+}
+
+export function matchSocketUrl(matchId: string): string {
+  const token = encodeURIComponent(localStorage.getItem('fluency_token') || '');
+  const base = /^https?:/.test(API_BASE_URL)
+    ? API_BASE_URL.replace(/^http/, 'ws')
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${API_BASE_URL}`;
+  return `${base}/games/ws/matches/${matchId}?token=${token}`;
+}
 
 export interface PendingCount {
   count: number;

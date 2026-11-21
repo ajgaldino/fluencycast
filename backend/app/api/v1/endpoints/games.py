@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.user import User
-from app.models.game import GameStats, Duel, UserAchievement, WordleGame, WeeklyScore, WeeklyBet
+from app.models.game import GameStats, Duel, UserAchievement, WordleGame, WeeklyScore, WeeklyBet, MatchQueue, MultiplayerMatch
 from app.services import gamification as gm
 from app.services import wordle as wd
 from app.services.achievements import CATALOG, check_achievements
@@ -410,8 +410,21 @@ def pending_count(db: Session = Depends(get_db), current_user: User = Depends(ge
         .filter(UserAchievement.user_id == current_user.id, UserAchievement.seen == False)  # noqa: E712
         .count()
     )
+    queue_waiting = (
+        db.query(MatchQueue)
+        .filter(MatchQueue.status == "WAITING", MatchQueue.user_id != current_user.id)
+        .count()
+    )
+    active_mp = (
+        db.query(MultiplayerMatch)
+        .filter(
+            or_(MultiplayerMatch.player1_id == current_user.id, MultiplayerMatch.player2_id == current_user.id),
+            MultiplayerMatch.status == "ACTIVE",
+        )
+        .count()
+    )
     return {
-        "count": live_invites + my_turn_duels + unseen,
+        "count": live_invites + my_turn_duels + unseen + queue_waiting + active_mp,
         "live_invites": live_invites,
         "my_turn_duels": my_turn_duels,
         "unseen_achievements": unseen,

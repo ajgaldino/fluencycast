@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Swords, Trophy, Flame, Type, Award, Calendar, X } from 'lucide-react';
+import { Swords, Trophy, Flame, Type, Award, Calendar, X, Users } from 'lucide-react';
 import {
-  gamesService, GameStats, LeaderboardRow, Player, DuelSummary, GameType, Achievement, WordleState, WeeklyData,
+  gamesService, GameStats, LeaderboardRow, Player, DuelSummary, GameType, Achievement, WordleState, WeeklyData, QueueStatus, MpGameType, queueSocketUrl,
 } from '../../services/games';
 import { usePolling } from '../../hooks/usePolling';
 import './Games.css';
@@ -21,6 +21,9 @@ export const Games: React.FC = () => {
   const [betInput, setBetInput] = useState('');
   const [betEditing, setBetEditing] = useState(false);
   const [savingBet, setSavingBet] = useState(false);
+  const [queue, setQueue] = useState<QueueStatus | null>(null);
+  const [mpGame, setMpGame] = useState<MpGameType>('HANGMAN');
+  const [queueBusy, setQueueBusy] = useState(false);
   const [opponent, setOpponent] = useState('');
   const [gameType, setGameType] = useState<GameType>('VOCAB');
   const [live, setLive] = useState(false);
@@ -30,7 +33,7 @@ export const Games: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const [s, b, p, d, a, w, wk] = await Promise.all([
+      const [s, b, p, d, a, w, wk, q] = await Promise.all([
         gamesService.getStats(),
         gamesService.getLeaderboard(),
         gamesService.getPlayers(),
@@ -38,6 +41,7 @@ export const Games: React.FC = () => {
         gamesService.getAchievements(),
         gamesService.getWordle(),
         gamesService.getWeekly(),
+        gamesService.getQueueStatus(),
       ]);
       setStats(s);
       setBoard(b);
@@ -46,6 +50,10 @@ export const Games: React.FC = () => {
       setAchievements(a);
       setWordle(w);
       setWeekly(wk);
+      setQueue(q);
+      if (q.match_id && q.my_status === 'MATCHED') {
+        navigate(`/games/match/${q.match_id}`);
+      }
       setBetInput((cur) => (betEditing ? cur : wk.stake));
       setOpponent((cur) => cur || p[0]?.id || '');
 
@@ -64,7 +72,42 @@ export const Games: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
-  usePolling(load, 8000);
+  usePolling(load, queue?.my_status === 'WAITING' ? 2000 : 8000);
+
+  // Instant match notification when waiting in queue
+  useEffect(() => {
+    if (queue?.my_status !== 'WAITING') return;
+    const ws = new WebSocket(queueSocketUrl());
+    ws.onmessage = () => void load();
+    return () => ws.close();
+  }, [queue?.my_status, load]);
+
+  const enterQueue = async () => {
+    setQueueBusy(true);
+    setError('');
+    try {
+      const res = await gamesService.joinQueue(mpGame);
+      if (res.matched && res.match_id) {
+        navigate(`/games/match/${res.match_id}`);
+      } else {
+        await load();
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setQueueBusy(false);
+    }
+  };
+
+  const exitQueue = async () => {
+    setQueueBusy(true);
+    try {
+      await gamesService.leaveQueue();
+      await load();
+    } finally {
+      setQueueBusy(false);
+    }
+  };
 
   const startDuel = async () => {
     if (!opponent) return;
@@ -162,6 +205,39 @@ export const Games: React.FC = () => {
           )}
         </div>
       )}
+
+      <div className="games-card">
+        <h2><Users size={18} /> Multiplayer Online (Fila de Match)</h2>
+        <p className="games-muted" style={{ marginTop: 0 }}>
+          Entre na fila e espere o outro jogador entrar para dar match automático!
+        </p>
+        {queue?.match_id && queue.my_status !== 'WAITING' && (
+          <div className="games-couple" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>🎮 Você tem uma partida em andamento!</span>
+            <button className="games-btn" onClick={() => navigate(`/games/match/${queue.match_id}`)}>Voltar à sala</button>
+          </div>
+        )}
+        {queue?.my_status === 'WAITING' ? (
+          <div className="queue-waiting">
+            <div className="queue-pulse">⏳ Procurando oponente na fila ({queue.my_game_type === 'HANGMAN' ? 'Jogo da Forca' : 'Anagrama'})…</div>
+            <button className="games-btn secondary" onClick={exitQueue} disabled={queueBusy}>Sair da fila</button>
+          </div>
+        ) : (
+          <>
+            <div className="games-tabs">
+              <button className={`games-tab ${mpGame === 'HANGMAN' ? 'active' : ''}`} onClick={() => setMpGame('HANGMAN')}>
+                🪢 Jogo da Forca {(queue?.waiting_by_game?.HANGMAN || 0) > 0 && <span className="queue-dot">1 na fila!</span>}
+              </button>
+              <button className={`games-tab ${mpGame === 'SCRAMBLE' ? 'active' : ''}`} onClick={() => setMpGame('SCRAMBLE')}>
+                🔤 Anagrama {(queue?.waiting_by_game?.SCRAMBLE || 0) > 0 && <span className="queue-dot">1 na fila!</span>}
+              </button>
+            </div>
+            <button className="games-btn" style={{ width: '100%' }} onClick={enterQueue} disabled={queueBusy}>
+              {queueBusy ? 'Entrando...' : (queue?.waiting_by_game?.[mpGame] || 0) > 0 ? '⚡ Dar Match Agora!' : 'Entrar na Fila'}
+            </button>
+          </>
+        )}
+      </div>
 
       <div className="games-card">
         <h2><Type size={18} /> Palavra do Dia</h2>

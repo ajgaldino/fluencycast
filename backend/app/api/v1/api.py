@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, videos, phrases, reviews, progress, ai, games, live
+from app.api.v1.endpoints import auth, videos, phrases, reviews, progress, ai, games, live, multiplayer
 
 api_router = APIRouter()
 
@@ -11,3 +11,5 @@ api_router.include_router(progress.router, prefix="/progress", tags=["Progress &
 api_router.include_router(ai.router, prefix="/ai", tags=["AI & Translation"])
 api_router.include_router(games.router, prefix="/games", tags=["Games"])
 api_router.include_router(live.router, prefix="/games", tags=["Live Duels"])
+
+api_router.include_router(multiplayer.router, prefix="/games", tags=["Multiplayer"])

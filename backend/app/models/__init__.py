@@ -4,7 +4,7 @@ from app.models.video import Video
 from app.models.transcript import TranscriptSegment
 from app.models.phrase import SavedPhrase
 from app.models.review import PhraseReview, StudySession
-from app.models.game import GameStats, Duel, UserAchievement, GameActivity, WordleGame, WeeklyScore, WeeklyBet
+from app.models.game import GameStats, Duel, UserAchievement, GameActivity, WordleGame, WeeklyScore, WeeklyBet, MatchQueue, MultiplayerMatch
 
 __all__ = [
     "Base",

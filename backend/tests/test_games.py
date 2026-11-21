@@ -302,3 +302,55 @@ def test_weekly_bet_pending_and_cancel(client):
     wk2 = client.get("/api/v1/games/weekly", headers=b).json()
     assert wk2["stake"] == "Quem perder faz o jantar"
     assert wk2["rows"][0]["name"] == "live_a" and wk2["rows"][0]["weekly_xp"] == wd.xp_for_result(True, 1)
+
+
+# ----------------------------------------------------------------- matchmaking + hangman + scramble
+def test_matchmaking_hangman_and_scramble(client, db_session):
+    from app.models.game import MultiplayerMatch
+
+    a = make_user(client, "mm_a@fluencycast.com")
+    b = make_user(client, "mm_b@fluencycast.com")
+
+    # A enters HANGMAN queue -> WAITING, B sees 1 waiting
+    r1 = client.post("/api/v1/games/queue/join", json={"game_type": "HANGMAN"}, headers=a).json()
+    assert r1["matched"] is False
+    st_b = client.get("/api/v1/games/queue/status", headers=b).json()
+    assert st_b["waiting_by_game"].get("HANGMAN") == 1
+    assert client.get("/api/v1/games/pending-count", headers=b).json()["count"] >= 1
+
+    # B enters HANGMAN queue -> instant MATCH!
+    r2 = client.post("/api/v1/games/queue/join", json={"game_type": "HANGMAN"}, headers=b).json()
+    assert r2["matched"] is True and r2["match_id"]
+    match_id = r2["match_id"]
+
+    # A polls status and gets the same match_id
+    st_a = client.get("/api/v1/games/queue/status", headers=a).json()
+    assert st_a["my_status"] == "MATCHED" and st_a["match_id"] == match_id
+
+    # Secret word is never leaked while playing
+    view_a = client.get(f"/api/v1/games/matches/{match_id}", headers=a).json()
+    assert view_a["hangman"]["word"] is None
+    secret = db_session.query(MultiplayerMatch).filter(MultiplayerMatch.id == match_id).first().state["word"]
+
+    # A guesses every unique letter -> wins!
+    for ch in dict.fromkeys(secret):
+        res = client.post(f"/api/v1/games/matches/{match_id}/hangman", json={"letter": ch}, headers=a)
+        assert res.status_code == 200
+    final = client.get(f"/api/v1/games/matches/{match_id}", headers=a).json()
+    assert final["status"] == "FINISHED" and final["i_won"] is True and final["hangman"]["word"] == secret
+    assert client.get(f"/api/v1/games/matches/{match_id}", headers=b).json()["i_won"] is False
+
+    # Now test SCRAMBLE matchmaking
+    client.post("/api/v1/games/queue/join", json={"game_type": "SCRAMBLE"}, headers=a)
+    m2 = client.post("/api/v1/games/queue/join", json={"game_type": "SCRAMBLE"}, headers=b).json()["match_id"]
+
+    # Wrong guess doesn't advance
+    miss = client.post(f"/api/v1/games/matches/{m2}/scramble", json={"guess": "zzzzzz"}, headers=a).json()
+    assert miss["hit"] is False and miss["scramble"]["round_index"] == 0
+
+    # Solve all 5 rounds as B
+    rounds = db_session.query(MultiplayerMatch).filter(MultiplayerMatch.id == m2).first().state["rounds"]
+    for rnd in rounds:
+        hit = client.post(f"/api/v1/games/matches/{m2}/scramble", json={"guess": rnd["word"]}, headers=b).json()
+        assert hit["hit"] is True
+    assert hit["status"] == "FINISHED" and hit["i_won"] is True
