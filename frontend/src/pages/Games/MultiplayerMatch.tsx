@@ -95,7 +95,6 @@ export const MultiplayerMatch: React.FC = () => {
     [match, busy, id]
   );
 
-  // Physical keyboard support for Hangman
   useEffect(() => {
     if (match?.game_type !== 'HANGMAN' || match.status !== 'ACTIVE') return;
     const onKey = (e: KeyboardEvent) => {
@@ -132,6 +131,20 @@ export const MultiplayerMatch: React.FC = () => {
     navigate('/games');
   };
 
+  const playAgain = async () => {
+    if (!match) return;
+    try {
+      const res = await gamesService.joinQueue(match.game_type);
+      if (res.matched && res.match_id) {
+        navigate(`/games/match/${res.match_id}`);
+      } else {
+        navigate('/games');
+      }
+    } catch {
+      navigate('/games');
+    }
+  };
+
   if (!match) return <div className="games-page"><div className="games-muted">{error || 'Carregando partida...'}</div></div>;
 
   if (match.status === 'CANCELLED') {
@@ -152,7 +165,7 @@ export const MultiplayerMatch: React.FC = () => {
     <div className="games-page">
       <div className="duel-progress">
         <span>
-          {match.game_type === 'HANGMAN' ? '🪢 Jogo da Forca' : '🔤 Batalha de Anagrama'} vs {match.opponent_name}
+          {match.game_type === 'HANGMAN' ? '🪢 Forca MD5' : '🔤 Anagrama MD5'} vs {match.opponent_name}
           {!finished && !socketUp && ' (reconectando…)'}
         </span>
         {match.status === 'ACTIVE' && (
@@ -164,83 +177,137 @@ export const MultiplayerMatch: React.FC = () => {
 
       {match.game_type === 'HANGMAN' && match.hangman && (
         <div className="games-card">
-          <div className="mp-opp-bar">
-            <span>
-              {match.opponent_name}: {match.hangman.opp_revealed_count}/{match.hangman.length} letras
-            </span>
-            <span>
-              {'❤️'.repeat(Math.max(0, match.hangman.max_errors - match.hangman.opp_wrong))}
-              {'🖤'.repeat(match.hangman.opp_wrong)}
-            </span>
+          <div className="mp-scoreboard">
+            <div className="mp-score-side">
+              <span className="mp-score-name">Você</span>
+              <span className="mp-score-num">{match.hangman.my_score}</span>
+            </div>
+            <div className="mp-round-pill">
+              Rodada {match.hangman.round_index + 1}/{match.hangman.total_rounds}
+              <div className="games-muted" style={{ fontSize: '0.7rem' }}>MD5 (quem fizer {match.hangman.win_score})</div>
+            </div>
+            <div className="mp-score-side">
+              <span className="mp-score-name">{match.opponent_name}</span>
+              <span className="mp-score-num">{match.hangman.opp_score}</span>
+            </div>
           </div>
 
-          <HangmanSvg errors={match.hangman.my_wrong} />
+          {match.hangman.last_word && !finished && (
+            <div className={`mp-last-banner ${match.hangman.last_won_by_me ? 'win' : ''}`}>
+              {match.hangman.last_won_by_me === true && '✅ Você levou a anterior! '}
+              {match.hangman.last_won_by_me === false && `⚡ ${match.opponent_name} levou a anterior! `}
+              {match.hangman.last_won_by_me === null && '🤝 Rodada anterior empatada! '}
+              <strong>{match.hangman.last_word.toUpperCase()}</strong> ({match.hangman.last_hint})
+            </div>
+          )}
 
-          <div className="games-muted" style={{ textAlign: 'center', marginBottom: 8 }}>
-            💡 Dica: <strong>{match.hangman.hint}</strong>
-          </div>
-
-          <div className="hangman-word">
-            {match.hangman.my_mask.map((ch, i) => (
-              <span key={i} className={`hangman-letter ${ch !== '_' ? 'revealed' : ''}`}>
-                {ch === '_' ? '' : ch}
+          {!finished && (
+            <div className="mp-opp-bar">
+              <span>
+                {match.opponent_name}: {match.hangman.opp_revealed_count}/{match.hangman.length} letras
               </span>
-            ))}
-          </div>
+              <span>
+                {'❤️'.repeat(Math.max(0, match.hangman.max_errors - match.hangman.opp_wrong))}
+                {'🖤'.repeat(match.hangman.opp_wrong)}
+              </span>
+            </div>
+          )}
 
           {finished ? (
-            <div className="duel-result" style={{ marginTop: 16 }}>
-              <h3>{match.is_draw ? '🤝 Empate!' : match.i_won ? '🏆 Você venceu!' : `😅 ${match.opponent_name} venceu!`}</h3>
-              <p className="games-muted">Palavra: <strong style={{ textTransform: 'uppercase' }}>{match.hangman.word}</strong></p>
-              <button className="games-btn" onClick={() => navigate('/games')}>Voltar à Arena</button>
-            </div>
-          ) : match.hangman.my_status === 'LOST' ? (
-            <div className="duel-result" style={{ marginTop: 16 }}>
-              <div className="games-error">💀 Você perdeu todas as vidas! Aguardando {match.opponent_name}…</div>
+            <div className="duel-result mp-finish-card">
+              <div style={{ fontSize: '2.5rem' }}>{match.is_draw ? '🤝' : match.i_won ? '🏆' : '😅'}</div>
+              <h2 style={{ justifyContent: 'center', margin: '4px 0' }}>
+                {match.is_draw ? 'Empate!' : match.i_won ? 'Você venceu a MD5!' : `${match.opponent_name} venceu!`}
+              </h2>
+              <div className="big">{match.hangman.my_score} x {match.hangman.opp_score}</div>
+              <p className="games-muted">
+                Última palavra: <strong style={{ textTransform: 'uppercase' }}>{match.hangman.word}</strong> ({match.hangman.hint})
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+                <button className="games-btn" onClick={playAgain}>⚡ Jogar Novamente</button>
+                <button className="games-btn secondary" onClick={() => navigate('/games')}>Voltar à Arena</button>
+              </div>
             </div>
           ) : (
-            <div className="wordle-keyboard">
-              {KEY_ROWS.map((row, ri) => (
-                <div className="wordle-krow" key={ri}>
-                  {row.split('').map((k) => {
-                    const used = match.hangman!.my_guessed.includes(k);
-                    const inWord = used && match.hangman!.my_mask.includes(k);
-                    const cls = used ? (inWord ? 'correct' : 'absent') : '';
-                    return (
-                      <button key={k} className={`wordle-key ${cls}`} disabled={used || busy} onClick={() => sendLetter(k)}>
-                        {k}
-                      </button>
-                    );
-                  })}
+            <>
+              <HangmanSvg errors={match.hangman.my_wrong} />
+
+              <div className="hangman-hint">
+                💡 Dica: <strong>{match.hangman.hint}</strong>
+              </div>
+
+              <div className="hangman-word">
+                {match.hangman.my_mask.map((ch, i) => (
+                  <span key={i} className={`hangman-letter ${ch !== '_' ? 'revealed' : ''}`}>
+                    {ch === '_' ? '' : ch}
+                  </span>
+                ))}
+              </div>
+
+              {match.hangman.my_status === 'LOST' ? (
+                <div className="duel-result" style={{ marginTop: 16 }}>
+                  <div className="games-error">💀 Você perdeu esta rodada! Aguardando {match.opponent_name}…</div>
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="wordle-keyboard">
+                  {KEY_ROWS.map((row, ri) => (
+                    <div className="wordle-krow" key={ri}>
+                      {row.split('').map((k) => {
+                        const used = match.hangman!.my_guessed.includes(k);
+                        const inWord = used && match.hangman!.my_mask.includes(k);
+                        const cls = used ? (inWord ? 'correct' : 'absent') : '';
+                        return (
+                          <button key={k} className={`wordle-key ${cls}`} disabled={used || busy} onClick={() => sendLetter(k)}>
+                            {k}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
 
       {match.game_type === 'SCRAMBLE' && match.scramble && (
         <div className="games-card">
-          <div className="mp-opp-bar">
-            <span>Rodada {match.scramble.round_index + 1}/{match.scramble.total_rounds}</span>
-            <span>Você {match.scramble.my_score} x {match.scramble.opp_score} {match.opponent_name}</span>
+          <div className="mp-scoreboard">
+            <div className="mp-score-side">
+              <span className="mp-score-name">Você</span>
+              <span className="mp-score-num">{match.scramble.my_score}</span>
+            </div>
+            <div className="mp-round-pill">
+              Rodada {match.scramble.round_index + 1}/{match.scramble.total_rounds}
+            </div>
+            <div className="mp-score-side">
+              <span className="mp-score-name">{match.opponent_name}</span>
+              <span className="mp-score-num">{match.scramble.opp_score}</span>
+            </div>
           </div>
 
           {match.scramble.last_word && !finished && (
-            <div className="games-muted" style={{ textAlign: 'center', marginBottom: 8 }}>
-              Rodada anterior: <strong>{match.scramble.last_word}</strong>
+            <div className="mp-last-banner">
+              Rodada anterior: <strong>{match.scramble.last_word.toUpperCase()}</strong>
             </div>
           )}
 
           {finished ? (
-            <div className="duel-result" style={{ marginTop: 12 }}>
-              <h2>{match.is_draw ? '🤝 Empate!' : match.i_won ? '🏆 Você venceu!' : `😅 ${match.opponent_name} venceu!`}</h2>
+            <div className="duel-result mp-finish-card">
+              <div style={{ fontSize: '2.5rem' }}>{match.is_draw ? '🤝' : match.i_won ? '🏆' : '😅'}</div>
+              <h2 style={{ justifyContent: 'center', margin: '4px 0' }}>
+                {match.is_draw ? 'Empate!' : match.i_won ? 'Você venceu!' : `${match.opponent_name} venceu!`}
+              </h2>
               <div className="big">{match.scramble.my_score} x {match.scramble.opp_score}</div>
-              <button className="games-btn" style={{ marginTop: 12 }} onClick={() => navigate('/games')}>Voltar à Arena</button>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+                <button className="games-btn" onClick={playAgain}>⚡ Jogar Novamente</button>
+                <button className="games-btn secondary" onClick={() => navigate('/games')}>Voltar à Arena</button>
+              </div>
             </div>
           ) : (
             <>
-              <div className="games-muted" style={{ textAlign: 'center', marginTop: 8 }}>
+              <div className="hangman-hint">
                 💡 Dica: <strong>{match.scramble.hint}</strong> ({match.scramble.word_length} letras)
               </div>
               <div className="scramble-tiles">

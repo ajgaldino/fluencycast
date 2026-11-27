@@ -69,3 +69,47 @@
 
 .scramble-tiles { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
 .scramble-tile { width: 42px; height: 46px; display: flex; align-items: center; justify-content: center; font-size: 1.35rem; font-weight: 800; text-transform: uppercase; background: var(--primary-light); border: 1px solid var(--border-focus); border-radius: var(--radius-sm); }
+
+/* Visual polish */
+.games-hero {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(168, 85, 247, 0.12) 60%, rgba(15, 23, 42, 0.9) 100%);
+  border-color: rgba(129, 140, 248, 0.35);
+}
+.games-hero-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.games-level-pill {
+  display: inline-block; padding: 3px 10px; border-radius: var(--radius-full);
+  background: var(--gradient-primary); color: #fff; font-size: 0.75rem; font-weight: 700; margin-bottom: 4px;
+}
+.games-xp-big { font-size: 1.7rem; font-weight: 800; line-height: 1.1; }
+.games-xp-big span { font-size: 0.9rem; color: var(--text-secondary); font-weight: 600; }
+.games-streak-box {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-radius: var(--radius-md); background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.games-mp-card {
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 6px 24px rgba(16, 185, 129, 0.08);
+}
+
+.mp-scoreboard {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(168, 85, 247, 0.12));
+  border: 1px solid rgba(129, 140, 248, 0.25); margin-bottom: 12px; text-align: center;
+}
+.mp-score-side { display: flex; flex-direction: column; align-items: center; }
+.mp-score-name { font-size: 0.78rem; color: var(--text-secondary); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-score-num { font-size: 1.6rem; font-weight: 800; color: var(--text-primary); line-height: 1.1; }
+.mp-round-pill { font-size: 0.8rem; font-weight: 700; color: var(--text-link); }
+
+.mp-last-banner {
+  padding: 8px 12px; border-radius: var(--radius-md); font-size: 0.82rem; text-align: center;
+  background: var(--bg-glass); border: 1px solid var(--border-subtle); margin-bottom: 10px;
+}
+.mp-last-banner.win { border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.1); }
+.hangman-hint {
+  text-align: center; padding: 8px 12px; border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25);
+  font-size: 0.9rem; margin: 6px 0 12px;
+}
+.mp-finish-card { padding: 16px 8px; }

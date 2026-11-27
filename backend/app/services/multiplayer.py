@@ -1,5 +1,6 @@
-"""Multiplayer matchmaking & real-time word games (Hangman & Scramble)."""
+"""Multiplayer matchmaking & real-time word games (MD5 Hangman & Scramble)."""
 import random
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -9,14 +10,18 @@ from app.models.game import MatchQueue, MultiplayerMatch
 from app.models.phrase import SavedPhrase
 from app.services import gamification as gm
 from app.services.achievements import check_achievements
+from app.services.dictionary_data import CORE_DICTIONARY
 
 HANGMAN_MAX_ERRORS = 6
+HANGMAN_ROUNDS = 5
+HANGMAN_WIN_SCORE = 3  # MD5: first to 3 wins (or highest after 5 rounds)
 SCRAMBLE_ROUNDS = 5
-XP_MP_WIN = 25
+XP_MP_WIN = 30
 XP_MP_DRAW = 15
-XP_MP_PLAY = 8
+XP_MP_PLAY = 10
 
-# Built-in fallback words (word, Portuguese hint) so matchmaking always works even with 0 saved phrases.
+_WORD_RE = re.compile(r"\b[a-zA-Z]{4,12}\b")
+
 BUILTIN_WORDS: List[Tuple[str, str]] = [
     ("music", "música"), ("dream", "sonho"), ("heart", "coração"), ("night", "noite"),
     ("light", "luz"), ("smile", "sorriso"), ("dance", "dançar"), ("voice", "voz"),
@@ -31,20 +36,75 @@ BUILTIN_WORDS: List[Tuple[str, str]] = [
 ]
 
 
-def _word_pool(db: Session, user_ids: List[str]) -> List[Tuple[str, str]]:
-    """Combine players' single-word saved phrases with the built-in pool."""
-    pool: Dict[str, str] = {w: h for w, h in BUILTIN_WORDS}
-    rows = (
-        db.query(SavedPhrase)
-        .filter(SavedPhrase.user_id.in_(user_ids), SavedPhrase.translation.isnot(None))
-        .all()
-    )
+def _clean_hint(raw: str) -> str:
+    return raw.split(",")[0].strip()
+
+
+def _pick_words(db: Session, user_ids: List[str], count: int) -> List[Tuple[str, str]]:
+    """Build a vast word pool prioritizing the players' own saved words & sentences,
+    then other users' words, then CORE_DICTIONARY + BUILTIN_WORDS."""
+    player_words: Dict[str, str] = {}
+    all_user_words: Dict[str, str] = {}
+    fallback_pool: Dict[str, str] = {w: h for w, h in BUILTIN_WORDS}
+
+    for word, meta in CORE_DICTIONARY.items():
+        w = word.strip().lower()
+        if 4 <= len(w) <= 12 and w.isalpha() and w.isascii():
+            tr = _clean_hint(meta.get("translation", ""))
+            if tr:
+                fallback_pool.setdefault(w, tr)
+
+    rows = db.query(SavedPhrase).filter(SavedPhrase.text.isnot(None)).all()
+    user_set = set(user_ids)
     for r in rows:
+        is_player = r.user_id in user_set
         w = (r.text or "").strip().lower()
         h = (r.translation or "").strip()
-        if 4 <= len(w) <= 12 and w.isalpha() and w.isascii() and h:
-            pool[w] = h
-    return list(pool.items())
+
+        # Direct saved word
+        if 4 <= len(w) <= 12 and w.isalpha() and w.isascii() and h and h.lower() != w:
+            if is_player:
+                player_words.setdefault(w, _clean_hint(h))
+            else:
+                all_user_words.setdefault(w, _clean_hint(h))
+
+        # Also extract vocabulary words from players' saved sentences/lyrics!
+        if is_player:
+            for source in (r.text, r.context_sentence):
+                for tok in _WORD_RE.findall(source or ""):
+                    tl = tok.lower()
+                    if tl in CORE_DICTIONARY:
+                        tr = _clean_hint(CORE_DICTIONARY[tl].get("translation", ""))
+                        if tr:
+                            player_words.setdefault(tl, tr)
+
+    chosen: Dict[str, str] = {}
+    # Prioritize up to `count` words from players' own study material (shuffled)
+    p_items = list(player_words.items())
+    random.shuffle(p_items)
+    for w, h in p_items[:count]:
+        chosen[w] = h
+
+    # Fill any remaining slots from other users' words, then CORE_DICTIONARY
+    if len(chosen) < count:
+        others = [(w, h) for w, h in all_user_words.items() if w not in chosen]
+        random.shuffle(others)
+        for w, h in others:
+            chosen[w] = h
+            if len(chosen) >= count:
+                break
+
+    if len(chosen) < count:
+        fb = [(w, h) for w, h in fallback_pool.items() if w not in chosen]
+        random.shuffle(fb)
+        for w, h in fb:
+            chosen[w] = h
+            if len(chosen) >= count:
+                break
+
+    result = list(chosen.items())
+    random.shuffle(result)
+    return result
 
 
 def _scramble(word: str) -> str:
@@ -58,21 +118,30 @@ def _scramble(word: str) -> str:
 
 
 def init_match_state(db: Session, game_type: str, p1_id: str, p2_id: str) -> dict:
-    pool = _word_pool(db, [p1_id, p2_id])
     if game_type == "HANGMAN":
-        word, hint = random.choice(pool)
+        chosen = _pick_words(db, [p1_id, p2_id], HANGMAN_ROUNDS)
+        rounds = [
+            {
+                "word": w,
+                "hint": h,
+                "p1_guessed": [],
+                "p2_guessed": [],
+                "p1_wrong": 0,
+                "p2_wrong": 0,
+                "p1_status": "PLAYING",
+                "p2_status": "PLAYING",
+                "winner_id": None,
+            }
+            for w, h in chosen
+        ]
         return {
-            "word": word,
-            "hint": hint,
-            "p1_guessed": [],
-            "p2_guessed": [],
-            "p1_wrong": 0,
-            "p2_wrong": 0,
-            "p1_status": "PLAYING",  # PLAYING, WON, LOST
-            "p2_status": "PLAYING",
+            "rounds": rounds,
+            "round_index": 0,
+            "p1_score": 0,
+            "p2_score": 0,
         }
-    # SCRAMBLE: best of N rounds
-    chosen = random.sample(pool, min(SCRAMBLE_ROUNDS, len(pool)))
+
+    chosen = _pick_words(db, [p1_id, p2_id], SCRAMBLE_ROUNDS)
     rounds = [{"word": w, "scrambled": _scramble(w), "hint": h, "winner_id": None} for w, h in chosen]
     return {
         "rounds": rounds,
@@ -86,6 +155,8 @@ def _finalize_match(db: Session, match: MultiplayerMatch, winner_id: Optional[st
     match.status = "FINISHED"
     match.winner_id = winner_id
     match.finished_at = datetime.now(timezone.utc)
+    # Mark queue entries as DONE so players are never redirected back into a finished match.
+    db.query(MatchQueue).filter(MatchQueue.match_id == match.id).update({"status": "DONE"})
     for uid in (match.player1_id, match.player2_id):
         gm.record_activity(db, uid)
         xp = XP_MP_DRAW if winner_id is None else (XP_MP_WIN if uid == winner_id else XP_MP_PLAY)
@@ -107,39 +178,64 @@ def apply_hangman_guess(db: Session, match: MultiplayerMatch, user_id: str, lett
         raise ValueError("Digite apenas uma letra (A-Z).")
 
     st = dict(match.state)
+    rounds = list(st["rounds"])
+    idx = st["round_index"]
+    if idx >= len(rounds):
+        return st
+
+    rnd = dict(rounds[idx])
     is_p1 = user_id == match.player1_id
     g_key = "p1_guessed" if is_p1 else "p2_guessed"
     w_key = "p1_wrong" if is_p1 else "p2_wrong"
     s_key = "p1_status" if is_p1 else "p2_status"
 
-    if st[s_key] != "PLAYING":
+    if rnd[s_key] != "PLAYING":
         return st
 
-    guessed = list(st[g_key])
+    guessed = list(rnd[g_key])
     if letter in guessed:
         return st
     guessed.append(letter)
-    st[g_key] = guessed
+    rnd[g_key] = guessed
 
-    word = st["word"]
+    word = rnd["word"]
     if letter not in word:
-        st[w_key] = st[w_key] + 1
+        rnd[w_key] = rnd[w_key] + 1
 
     if all(ch in guessed for ch in word):
-        st[s_key] = "WON"
-    elif st[w_key] >= HANGMAN_MAX_ERRORS:
-        st[s_key] = "LOST"
+        rnd[s_key] = "WON"
+    elif rnd[w_key] >= HANGMAN_MAX_ERRORS:
+        rnd[s_key] = "LOST"
+
+    round_over = False
+    if rnd[s_key] == "WON":
+        rnd["winner_id"] = user_id
+        if is_p1:
+            st["p1_score"] += 1
+        else:
+            st["p2_score"] += 1
+        round_over = True
+    elif rnd["p1_status"] == "LOST" and rnd["p2_status"] == "LOST":
+        round_over = True
+
+    rounds[idx] = rnd
+    st["rounds"] = rounds
+
+    if round_over:
+        match_won = st["p1_score"] >= HANGMAN_WIN_SCORE or st["p2_score"] >= HANGMAN_WIN_SCORE
+        if match_won or idx + 1 >= len(rounds):
+            match.state = st
+            if st["p1_score"] > st["p2_score"]:
+                winner = match.player1_id
+            elif st["p2_score"] > st["p1_score"]:
+                winner = match.player2_id
+            else:
+                winner = None
+            _finalize_match(db, match, winner)
+            return st
+        st["round_index"] = idx + 1
 
     match.state = st
-
-    # Check if match should end:
-    # - Someone won -> that player wins immediately!
-    # - Both lost -> draw.
-    if st[s_key] == "WON":
-        _finalize_match(db, match, user_id)
-    elif st["p1_status"] == "LOST" and st["p2_status"] == "LOST":
-        _finalize_match(db, match, None)
-
     return st
 
 
@@ -155,7 +251,6 @@ def apply_scramble_guess(db: Session, match: MultiplayerMatch, user_id: str, gue
     if guess != current["word"]:
         return st, False
 
-    # Correct! Whoever got here first wins the round.
     current["winner_id"] = user_id
     rounds[idx] = current
     st["rounds"] = rounds
@@ -197,28 +292,37 @@ def public_match_state(match: MultiplayerMatch, me_id: str, opponent_name: str) 
         "is_draw": match.status == "FINISHED" and match.winner_id is None,
     }
 
+    rounds = st["rounds"]
+    idx = min(st["round_index"], len(rounds) - 1)
+    cur = rounds[idx]
+
     if match.game_type == "HANGMAN":
-        word = st["word"]
-        my_g = st["p1_guessed"] if is_p1 else st["p2_guessed"]
-        opp_g = st["p2_guessed"] if is_p1 else st["p1_guessed"]
+        word = cur["word"]
+        my_g = cur["p1_guessed"] if is_p1 else cur["p2_guessed"]
+        opp_g = cur["p2_guessed"] if is_p1 else cur["p1_guessed"]
+        prev = rounds[idx - 1] if idx > 0 else None
         base["hangman"] = {
+            "round_index": idx,
+            "total_rounds": len(rounds),
+            "win_score": HANGMAN_WIN_SCORE,
+            "my_score": st["p1_score"] if is_p1 else st["p2_score"],
+            "opp_score": st["p2_score"] if is_p1 else st["p1_score"],
             "length": len(word),
-            "hint": st["hint"],
+            "hint": cur["hint"],
             "max_errors": HANGMAN_MAX_ERRORS,
             "my_mask": [ch if (ch in my_g or finished) else "_" for ch in word],
-            "opp_mask": [ch if (ch in opp_g or finished) else ("*" if ch in opp_g else "_") for ch in word],
             "opp_revealed_count": sum(1 for ch in word if ch in opp_g),
             "my_guessed": my_g,
-            "my_wrong": st["p1_wrong"] if is_p1 else st["p2_wrong"],
-            "opp_wrong": st["p2_wrong"] if is_p1 else st["p1_wrong"],
-            "my_status": st["p1_status"] if is_p1 else st["p2_status"],
-            "opp_status": st["p2_status"] if is_p1 else st["p1_status"],
+            "my_wrong": cur["p1_wrong"] if is_p1 else cur["p2_wrong"],
+            "opp_wrong": cur["p2_wrong"] if is_p1 else cur["p1_wrong"],
+            "my_status": cur["p1_status"] if is_p1 else cur["p2_status"],
+            "opp_status": cur["p2_status"] if is_p1 else cur["p1_status"],
             "word": word if finished else None,
+            "last_word": prev["word"] if prev else None,
+            "last_hint": prev["hint"] if prev else None,
+            "last_won_by_me": (prev["winner_id"] == me_id) if prev and prev["winner_id"] else None,
         }
     else:
-        rounds = st["rounds"]
-        idx = min(st["round_index"], len(rounds) - 1)
-        cur = rounds[idx]
         base["scramble"] = {
             "round_index": idx,
             "total_rounds": len(rounds),

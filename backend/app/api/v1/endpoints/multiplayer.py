@@ -67,10 +67,17 @@ def queue_status(db: Session = Depends(get_db), current_user: User = Depends(get
         .first()
     )
 
+    if active_match:
+        my_status = "MATCHED"
+    elif my_entry and my_entry.status == "WAITING":
+        my_status = "WAITING"
+    else:
+        my_status = "IDLE"
+
     return {
-        "my_status": my_entry.status if my_entry else "IDLE",
-        "my_game_type": my_entry.game_type if my_entry else None,
-        "match_id": (my_entry.match_id if my_entry and my_entry.status == "MATCHED" else None) or (active_match.id if active_match else None),
+        "my_status": my_status,
+        "my_game_type": my_entry.game_type if my_entry and my_status == "WAITING" else None,
+        "match_id": active_match.id if active_match else None,
         "waiting_by_game": waiting_by_game,
     }
 

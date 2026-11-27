@@ -169,11 +169,15 @@ export interface MatchView {
   is_draw: boolean;
   hit?: boolean;
   hangman?: {
+    round_index: number;
+    total_rounds: number;
+    win_score: number;
+    my_score: number;
+    opp_score: number;
     length: number;
     hint: string;
     max_errors: number;
     my_mask: string[];
-    opp_mask: string[];
     opp_revealed_count: number;
     my_guessed: string[];
     my_wrong: number;
@@ -181,6 +185,9 @@ export interface MatchView {
     my_status: 'PLAYING' | 'WON' | 'LOST';
     opp_status: 'PLAYING' | 'WON' | 'LOST';
     word: string | null;
+    last_word: string | null;
+    last_hint: string | null;
+    last_won_by_me: boolean | null;
   };
   scramble?: {
     round_index: number;

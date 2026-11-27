@@ -187,15 +187,26 @@ export const Games: React.FC = () => {
       )}
 
       {stats && (
-        <div className="games-card">
-          <h2><Flame size={18} /> Nível {stats.level} · {stats.xp} XP</h2>
+        <div className="games-card games-hero">
+          <div className="games-hero-top">
+            <div>
+              <div className="games-level-pill">Nível {stats.level}</div>
+              <div className="games-xp-big">{stats.xp} <span>XP</span></div>
+            </div>
+            <div className="games-streak-box">
+              <Flame size={20} color="#f59e0b" />
+              <div>
+                <strong>{stats.streak_days}d</strong>
+                <div className="games-muted" style={{ fontSize: '0.72rem' }}>sequência</div>
+              </div>
+            </div>
+          </div>
           <div className="games-xp-bar"><div className="games-xp-fill" style={{ width: `${pct}%` }} /></div>
           <div className="games-muted">{stats.next_level_xp - stats.xp} XP para o nível {stats.level + 1}</div>
           <div className="games-stats-row">
             <span className="games-chip">🏆 {stats.wins} vitórias</span>
             <span className="games-chip">💀 {stats.losses} derrotas</span>
             <span className="games-chip">🤝 {stats.draws} empates</span>
-            <span className="games-chip">🔥 {stats.streak_days} dias seguidos</span>
           </div>
           {couple && couple.partner_name && couple.days > 0 && (
             <div className="games-couple">
@@ -206,10 +217,10 @@ export const Games: React.FC = () => {
         </div>
       )}
 
-      <div className="games-card">
+      <div className="games-card games-mp-card">
         <h2><Users size={18} /> Multiplayer Online (Fila de Match)</h2>
         <p className="games-muted" style={{ marginTop: 0 }}>
-          Entre na fila e espere o outro jogador entrar para dar match automático!
+          Entre na fila e espere o outro jogador entrar para dar match automático! Palavras do seu vocabulário + repertório geral.
         </p>
         {queue?.match_id && queue.my_status !== 'WAITING' && (
           <div className="games-couple" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -219,14 +230,14 @@ export const Games: React.FC = () => {
         )}
         {queue?.my_status === 'WAITING' ? (
           <div className="queue-waiting">
-            <div className="queue-pulse">⏳ Procurando oponente na fila ({queue.my_game_type === 'HANGMAN' ? 'Jogo da Forca' : 'Anagrama'})…</div>
+            <div className="queue-pulse">⏳ Procurando oponente na fila ({queue.my_game_type === 'HANGMAN' ? 'Jogo da Forca MD5' : 'Anagrama MD5'})…</div>
             <button className="games-btn secondary" onClick={exitQueue} disabled={queueBusy}>Sair da fila</button>
           </div>
         ) : (
           <>
             <div className="games-tabs">
               <button className={`games-tab ${mpGame === 'HANGMAN' ? 'active' : ''}`} onClick={() => setMpGame('HANGMAN')}>
-                🪢 Jogo da Forca {(queue?.waiting_by_game?.HANGMAN || 0) > 0 && <span className="queue-dot">1 na fila!</span>}
+                🪢 Forca MD5 {(queue?.waiting_by_game?.HANGMAN || 0) > 0 && <span className="queue-dot">1 na fila!</span>}
               </button>
               <button className={`games-tab ${mpGame === 'SCRAMBLE' ? 'active' : ''}`} onClick={() => setMpGame('SCRAMBLE')}>
                 🔤 Anagrama {(queue?.waiting_by_game?.SCRAMBLE || 0) > 0 && <span className="queue-dot">1 na fila!</span>}

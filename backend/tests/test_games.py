@@ -329,16 +329,23 @@ def test_matchmaking_hangman_and_scramble(client, db_session):
 
     # Secret word is never leaked while playing
     view_a = client.get(f"/api/v1/games/matches/{match_id}", headers=a).json()
-    assert view_a["hangman"]["word"] is None
-    secret = db_session.query(MultiplayerMatch).filter(MultiplayerMatch.id == match_id).first().state["word"]
+    assert view_a["hangman"]["word"] is None and view_a["hangman"]["total_rounds"] == 5
+    h_rounds = db_session.query(MultiplayerMatch).filter(MultiplayerMatch.id == match_id).first().state["rounds"]
 
-    # A guesses every unique letter -> wins!
-    for ch in dict.fromkeys(secret):
-        res = client.post(f"/api/v1/games/matches/{match_id}/hangman", json={"letter": ch}, headers=a)
-        assert res.status_code == 200
+    # A wins 3 rounds (MD5 -> finishes 3x0)
+    for r_idx in range(3):
+        secret = h_rounds[r_idx]["word"]
+        for ch in dict.fromkeys(secret):
+            res = client.post(f"/api/v1/games/matches/{match_id}/hangman", json={"letter": ch}, headers=a)
+            assert res.status_code == 200
     final = client.get(f"/api/v1/games/matches/{match_id}", headers=a).json()
-    assert final["status"] == "FINISHED" and final["i_won"] is True and final["hangman"]["word"] == secret
+    assert final["status"] == "FINISHED" and final["i_won"] is True
+    assert final["hangman"]["my_score"] == 3 and final["hangman"]["opp_score"] == 0
     assert client.get(f"/api/v1/games/matches/{match_id}", headers=b).json()["i_won"] is False
+
+    # After finishing, queue status is IDLE (so players don't get trapped on the match screen)
+    st_after = client.get("/api/v1/games/queue/status", headers=a).json()
+    assert st_after["my_status"] == "IDLE" and st_after["match_id"] is None
 
     # Now test SCRAMBLE matchmaking
     client.post("/api/v1/games/queue/join", json={"game_type": "SCRAMBLE"}, headers=a)
